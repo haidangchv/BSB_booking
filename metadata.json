@@ -1,0 +1,6 @@
+{
+  "name": "BSB Pickleball Club",
+  "description": "Hệ thống đặt sân Pickleball chuyên nghiệp BSB: Đặt lịch cố định, vãng lai, sự kiện, quản lý Câu lạc bộ & Giải đấu Minitour",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

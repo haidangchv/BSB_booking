@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BSB Pickleball Club - Đặt Sân, CLB & Minitour</title>
+    <meta name="description" content="Hệ thống đặt sân Pickleball chuyên nghiệp BSB: Đặt lịch cố định, vãng lai, sự kiện, CLB và giải đấu Minitour" />
+    <script>
+      // Shim window.fetch to ensure it is writable and has a setter to prevent 'Cannot set property fetch of #<Window> which has only a getter' errors
+      (function() {
+        try {
+          const originalFetch = window.fetch ? window.fetch.bind(window) : undefined;
+          let currentFetch = originalFetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return currentFetch;
+            },
+            set: function(fn) {
+              currentFetch = fn;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          // fallback if defineProperty fails
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
