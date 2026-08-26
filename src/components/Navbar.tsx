@@ -8,6 +8,7 @@ import {
 import { BSBLogo } from './BSBLogo';
 import { BSB_INFO } from '../data/mockData';
 import { User } from '../types';
+import { GoogleLogo } from './Auth/GoogleSignInModal';
 
 interface NavbarProps {
   activeTab: 'booking' | 'clubs' | 'minitour' | 'admin';
@@ -291,6 +292,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <LogIn className="w-4 h-4 text-amber-300" />
                 <span>Đăng Nhập</span>
               </button>
+
+              <button
+                onClick={() => onOpenAuthModal('login')}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold border border-slate-300 hover:border-slate-400 transition-colors cursor-pointer shadow-xs"
+                title="Đăng nhập nhanh bằng Google"
+              >
+                <GoogleLogo size={15} />
+                <span>Google</span>
+              </button>
             </div>
           )}
 
@@ -343,16 +353,29 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </div>
           ) : (
-            <button
-              onClick={() => {
-                onOpenAuthModal('login');
-                setMobileMenuOpen(false);
-              }}
-              className="w-full py-2.5 bg-[#11385E] text-white rounded-xl font-bold flex items-center justify-center gap-2 mb-2"
-            >
-              <LogIn className="w-4 h-4 text-amber-300" />
-              Đăng Nhập / Đăng Ký Hội Viên
-            </button>
+            <div className="space-y-2 mb-2">
+              <button
+                onClick={() => {
+                  onOpenAuthModal('login');
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full py-2.5 bg-[#11385E] text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xs"
+              >
+                <LogIn className="w-4 h-4 text-amber-300" />
+                Đăng Nhập / Đăng Ký Hội Viên
+              </button>
+
+              <button
+                onClick={() => {
+                  onOpenAuthModal('login');
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full py-2.5 bg-white text-slate-700 hover:bg-slate-50 border border-slate-300 rounded-xl font-bold flex items-center justify-center gap-2 shadow-xs"
+              >
+                <GoogleLogo size={16} />
+                Tiếp Tục Bằng Tài Khoản Google
+              </button>
+            </div>
           )}
 
           <button

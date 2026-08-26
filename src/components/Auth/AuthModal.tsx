@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { User, UserRole } from '../../types';
 import { MOCK_USERS, DEFAULT_ADMIN_USER, DEFAULT_CUSTOMER_USER } from '../../data/mockData';
+import { GoogleSignInModal, GoogleLogo } from './GoogleSignInModal';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -26,6 +27,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   initialTab = 'login'
 }) => {
   const [tab, setTab] = useState<'login' | 'register' | 'demo'>(initialTab === 'switch' ? 'demo' : initialTab);
+  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
+  const [googleMode, setGoogleMode] = useState<'signin' | 'signup'>('signin');
   
   // Login form state
   const [loginIdentifier, setLoginIdentifier] = useState('');
@@ -318,7 +321,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               className="w-full py-3 bg-[#11385E] hover:bg-[#0c2946] text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
             >
               <LogIn className="w-4 h-4" />
-              Đăng Nhập Ngay
+              Đăng Nhập Bằng Mật Khẩu
+            </button>
+
+            {/* Google OAuth Divider & Button */}
+            <div className="relative my-4">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-200" />
+              </div>
+              <div className="relative flex justify-center text-[10px] uppercase">
+                <span className="bg-white px-3 text-slate-500 font-bold tracking-wider">
+                  Hoặc Tiếp Tục Bằng
+                </span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setGoogleMode('signin');
+                setIsGoogleModalOpen(true);
+              }}
+              className="w-full py-3 px-4 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 rounded-xl font-bold border border-slate-300 hover:border-slate-400 flex items-center justify-center gap-2.5 shadow-xs transition-all cursor-pointer group"
+            >
+              <GoogleLogo size={18} />
+              <span>Đăng Nhập Bằng Tài Khoản Google</span>
             </button>
 
             <div className="pt-2 text-center text-[11px] text-slate-500">
@@ -345,6 +372,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             ) : (
               <>
+                {/* Google Fast Register CTA */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGoogleMode('signup');
+                    setIsGoogleModalOpen(true);
+                  }}
+                  className="w-full py-2.5 px-4 bg-blue-50/80 hover:bg-blue-100 text-blue-900 rounded-xl font-bold border border-blue-200 flex items-center justify-center gap-2.5 shadow-xs transition-all cursor-pointer"
+                >
+                  <GoogleLogo size={18} />
+                  <span>Đăng Ký Nhanh 1-Chạm Bằng Google</span>
+                </button>
+
+                <div className="relative my-2">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-slate-200" />
+                  </div>
+                  <div className="relative flex justify-center text-[10px] uppercase">
+                    <span className="bg-white px-3 text-slate-400 font-bold tracking-wider">
+                      Hoặc điền form đăng ký
+                    </span>
+                  </div>
+                </div>
+
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Họ & Tên *</label>
                   <input
@@ -438,9 +489,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* TAB 3: 1-CLICK DEMO ACCOUNTS (QUICK SWITCHER) */}
         {tab === 'demo' && (
           <div className="space-y-3 text-xs">
-            <p className="text-[11px] text-slate-500">
-              Chọn một trong các tài khoản mẫu dưới đây để thử nghiệm ngay lập tức các phân quyền:
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-slate-500">
+                Chọn tài khoản mẫu hoặc đăng nhập nhanh bằng Google:
+              </p>
+              <button
+                onClick={() => {
+                  setGoogleMode('signin');
+                  setIsGoogleModalOpen(true);
+                }}
+                className="text-[11px] text-indigo-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <GoogleLogo size={13} />
+                Mở Google Account
+              </button>
+            </div>
 
             {/* Admin Account */}
             <div
@@ -533,6 +596,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             ))}
           </div>
         )}
+
+        {/* Google OAuth Modal */}
+        <GoogleSignInModal
+          isOpen={isGoogleModalOpen}
+          mode={googleMode}
+          onClose={() => setIsGoogleModalOpen(false)}
+          onSuccess={(user) => {
+            onLogin(user);
+            setIsGoogleModalOpen(false);
+            onClose();
+          }}
+        />
       </motion.div>
     </div>
   );
