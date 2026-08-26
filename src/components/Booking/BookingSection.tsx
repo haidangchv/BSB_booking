@@ -17,6 +17,7 @@ interface BookingSectionProps {
   clubs: Club[];
   bookings: Booking[];
   currentUser?: User | null;
+  initialBookingType?: BookingType;
   onAddBooking: (booking: Booking) => void;
   onNavigateToClubs?: () => void;
 }
@@ -26,11 +27,18 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
   clubs,
   bookings,
   currentUser,
+  initialBookingType = 'casual',
   onAddBooking,
   onNavigateToClubs
 }) => {
   // 5 Booking Types: 'clb' | 'minitour' | 'fixed' | 'casual' | 'event'
-  const [bookingType, setBookingType] = useState<BookingType>('casual');
+  const [bookingType, setBookingType] = useState<BookingType>(initialBookingType);
+
+  useEffect(() => {
+    if (initialBookingType) {
+      setBookingType(initialBookingType);
+    }
+  }, [initialBookingType]);
   const [viewMode, setViewMode] = useState<'day' | 'week'>('day');
   const [filterCourtId, setFilterCourtId] = useState<string>('all');
   const [filterType, setFilterType] = useState<string>('all');
@@ -599,7 +607,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
   };
 
   return (
-    <section id="booking-section" className="py-8 px-4 max-w-7xl mx-auto font-sans">
+    <section id="booking-calendar-section" className="py-8 px-4 max-w-7xl mx-auto font-sans scroll-mt-20">
       {/* Brand Header */}
       <div className="text-center max-w-3xl mx-auto mb-8">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#11385E]/10 border border-[#11385E]/20 text-[#11385E] text-xs font-bold tracking-wider uppercase mb-3">
