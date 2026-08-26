@@ -208,6 +208,20 @@ export interface Minitour {
   rules: string[];
 }
 
+export interface EmailNotification {
+  id: string;
+  bookingId?: string;
+  bookingCode?: string;
+  recipientEmail: string;
+  recipientName: string;
+  subject: string;
+  templateType: 'PENDING' | 'CONFIRMED' | 'RESCHEDULED' | 'CANCELLED' | 'REJECTED';
+  htmlContent: string;
+  status: 'SENT' | 'FAILED' | 'PENDING';
+  sentAt: string;
+  providerMessageId?: string;
+}
+
 export type UserRole = 'customer' | 'admin';
 
 export interface User {

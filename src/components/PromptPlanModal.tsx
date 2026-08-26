@@ -283,7 +283,7 @@ Phải có 3 tab chuyển đổi linh hoạt:
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="p-4 bg-blue-50/70 border border-blue-200 rounded-xl">
                       <div className="font-bold text-blue-900 mb-1">1. Đặt Lịch Vãng Lai</div>
-                      <p className="text-xs text-slate-600 mb-2">Đặt theo giờ linh hoạt, thanh toán theo slot 60-120 phút.</p>
+                      <p className="text-xs text-slate-600 mb-2">Đặt theo giờ linh hoạt, thanh toán theo slot 30-120 phút.</p>
                       <ul className="text-xs space-y-1 text-slate-700">
                         <li>• Giờ thường (05:30-16:00): 130k - 180k/h</li>
                         <li>• Giờ vàng (16:00-23:00): 190k - 250k/h</li>

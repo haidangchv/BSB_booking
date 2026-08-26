@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Navbar } from './components/Navbar';
 import { HomeHero } from './components/HomeHero';
 import { BookingSection } from './components/Booking/BookingSection';
@@ -9,18 +10,38 @@ import { PromptPlanModal } from './components/PromptPlanModal';
 import { TicketLookupModal } from './components/TicketLookupModal';
 import { AuthModal } from './components/Auth/AuthModal';
 import { MyBookingsModal } from './components/Auth/MyBookingsModal';
+import { WelcomeIntro } from './components/WelcomeIntro';
 import { Footer } from './components/Footer';
 import { 
   INITIAL_COURTS, INITIAL_CLUBS, INITIAL_MINITOURS, INITIAL_BOOKINGS, 
   DEFAULT_ADMIN_USER, DEFAULT_CUSTOMER_USER 
 } from './data/mockData';
 import { Court, Club, Minitour, Booking, TournamentTeam, User, BookingType } from './types';
-import { DatabaseService, isSupabaseConfigured } from './lib/supabase';
+import { DatabaseService } from './lib/supabase';
+import { EmailService } from './lib/emailService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'booking' | 'clubs' | 'minitour' | 'admin'>('booking');
   const [selectedBookingType, setSelectedBookingType] = useState<BookingType>('casual');
   const [isLoading, setIsLoading] = useState(true);
+
+  // Welcome animation display state (plays on first visit or when user clicks replay)
+  const [showWelcomeIntro, setShowWelcomeIntro] = useState<boolean>(() => {
+    try {
+      return !sessionStorage.getItem('bsb_intro_seen');
+    } catch {
+      return true;
+    }
+  });
+
+  const handleDismissIntro = () => {
+    setShowWelcomeIntro(false);
+    try {
+      sessionStorage.setItem('bsb_intro_seen', 'true');
+    } catch {
+      // ignore
+    }
+  };
 
   // Authentication State: Khách Hàng (Customer) vs Quản Trị Viên (Admin)
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -32,7 +53,6 @@ export default function App() {
     } catch {
       // fallback
     }
-    // Default to a realistic active Customer user for instant exploration
     return DEFAULT_CUSTOMER_USER;
   });
 
@@ -56,7 +76,7 @@ export default function App() {
       try {
         const [loadedCourts, loadedClubs, loadedBookings, loadedMinitours] = await Promise.all([
           DatabaseService.getCourts(),
-          DatabaseService.getClubs(true), // Include inactive for admin
+          DatabaseService.getClubs(true),
           DatabaseService.getBookings(),
           DatabaseService.getMinitours()
         ]);
@@ -80,6 +100,10 @@ export default function App() {
       localStorage.setItem('bsb_current_user_v3', JSON.stringify(user));
     } catch {
       // ignore
+    }
+    // Auto-redirect admin users to admin dashboard
+    if (user.role === 'admin') {
+      setActiveTab('admin');
     }
   };
 
@@ -111,6 +135,122 @@ export default function App() {
   const handleUpdateBookingStatus = async (id: string, status: Booking['bookingStatus']) => {
     const updated = await DatabaseService.updateBookingStatus(id, status);
     setBookings(updated);
+
+    // Send transactional status change email
+    const target = updated.find(b => b.id === id);
+    if (target) {
+      const templateType = status === 'CONFIRMED' ? 'CONFIRMED' : status === 'CANCELLED' ? 'CANCELLED' : status === 'REJECTED' ? 'REJECTED' : 'PENDING';
+      EmailService.sendBookingConfirmationEmail(target, templateType).catch(console.warn);
+    }
+  };
+
+  const handleRescheduleBooking = async (
+    bookingId: string,
+    newDate: string,
+    newStartTime: string,
+    newEndTime: string,
+    newCourtId?: string,
+    newCourtName?: string
+  ) => {
+    let updatedTarget: Booking | undefined;
+    setBookings(prev =>
+      prev.map(b => {
+        if (b.id !== bookingId) return b;
+        updatedTarget = {
+          ...b,
+          date: newDate,
+          startTime: newStartTime,
+          endTime: newEndTime,
+          courtId: newCourtId || b.courtId,
+          courtName: newCourtName || b.courtName,
+          bookingStatus: 'PENDING' as const,
+          updatedAt: new Date().toISOString()
+        };
+        return updatedTarget;
+      })
+    );
+    // Persist to storage
+    const currentBookings = bookings.map(b => {
+      if (b.id !== bookingId) return b;
+      return {
+        ...b,
+        date: newDate,
+        startTime: newStartTime,
+        endTime: newEndTime,
+        courtId: newCourtId || b.courtId,
+        courtName: newCourtName || b.courtName,
+        bookingStatus: 'PENDING' as const,
+        updatedAt: new Date().toISOString()
+      };
+    });
+    try {
+      localStorage.setItem('bsb_bookings_v2', JSON.stringify(currentBookings));
+    } catch { /* ignore */ }
+
+    // Send email notification about rescheduled booking
+    if (updatedTarget) {
+      EmailService.sendBookingConfirmationEmail(updatedTarget, 'RESCHEDULED').catch(console.warn);
+    }
+  };
+
+  const handleBlockCourt = (courtId: string, date: string, startTime: string, endTime: string, reason: string) => {
+    // Find conflicting bookings (active ones on same court, date, overlapping time)
+    const parseMin = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + (m || 0);
+    };
+    const blockStart = parseMin(startTime);
+    const blockEnd = parseMin(endTime);
+
+    const conflictingIds: string[] = [];
+    const affectedBookings: Booking[] = [];
+    bookings.forEach(b => {
+      if (b.date !== date) return;
+      if (b.bookingStatus === 'CANCELLED' || b.bookingStatus === 'REJECTED') return;
+      const bCourtIds = b.courtIds && b.courtIds.length > 0 ? b.courtIds : [b.courtId];
+      if (!bCourtIds.includes(courtId)) return;
+      const bStart = parseMin(b.startTime);
+      const bEnd = parseMin(b.endTime);
+      if (Math.max(blockStart, bStart) < Math.min(blockEnd, bEnd)) {
+        conflictingIds.push(b.id);
+        affectedBookings.push(b);
+      }
+    });
+
+    // Revert conflicting bookings to PENDING
+    if (conflictingIds.length > 0) {
+      setBookings(prev =>
+        prev.map(b =>
+          conflictingIds.includes(b.id)
+            ? { ...b, bookingStatus: 'PENDING' as const, updatedAt: new Date().toISOString() }
+            : b
+        )
+      );
+
+      // Notify affected customers via email
+      affectedBookings.forEach(ab => {
+        EmailService.sendBookingConfirmationEmail(
+          { ...ab, bookingStatus: 'PENDING', notes: `Sân đang bảo trì (${reason}). Đang chờ xếp lịch lại.` },
+          'RESCHEDULED'
+        ).catch(console.warn);
+      });
+    }
+
+    // Save the court block info to localStorage
+    const blocks = JSON.parse(localStorage.getItem('bsb_court_blocks_v2') || '[]');
+    blocks.push({
+      id: `block-${Date.now()}`,
+      courtId,
+      date,
+      startTime,
+      endTime,
+      reason,
+      createdBy: currentUser?.name || 'Admin',
+      createdAt: new Date().toISOString()
+    });
+    localStorage.setItem('bsb_court_blocks_v2', JSON.stringify(blocks));
+
+    return conflictingIds;
   };
 
   const handleCancelBooking = async (bookingId: string) => {
@@ -179,7 +319,14 @@ export default function App() {
   const isAdmin = currentUser?.role === 'admin';
 
   return (
-    <div className="min-h-screen bg-[#071c33] text-slate-800 flex flex-col font-sans selection:bg-[#11385E] selection:text-white">
+    <div className="min-h-screen bg-[#051323] text-slate-800 flex flex-col font-sans selection:bg-amber-400 selection:text-slate-950">
+      {/* Welcome Intro Splash Animation */}
+      <AnimatePresence>
+        {showWelcomeIntro && (
+          <WelcomeIntro onComplete={handleDismissIntro} />
+        )}
+      </AnimatePresence>
+
       {/* Top Navigation */}
       <Navbar
         activeTab={activeTab}
@@ -190,67 +337,104 @@ export default function App() {
         onOpenPlanModal={() => setIsPlanModalOpen(true)}
         onOpenTicketLookup={() => setIsTicketModalOpen(true)}
         onLogout={handleLogout}
+        onReplayIntro={() => setShowWelcomeIntro(true)}
       />
 
       {/* Hero Section */}
       {activeTab === 'booking' && (
         <HomeHero
+          selectedBookingType={selectedBookingType}
           onSelectBookingType={handleSelectHeroBookingType}
           onScrollToBooking={handleScrollToBooking}
           onNavigateToClubs={() => setActiveTab('clubs')}
-          courtsCount={courts.length || 4}
-          availableSlotsCount={14}
+          courtsCount={courts.length || 9}
+          availableSlotsCount={22}
         />
       )}
 
-      {/* Main App Content according to active tab */}
-      <main className="flex-1 bg-[#f8fafc]">
-        {activeTab === 'booking' && (
-          <BookingSection
-            courts={courts}
-            clubs={clubs}
-            bookings={bookings}
-            currentUser={currentUser}
-            initialBookingType={selectedBookingType}
-            onAddBooking={handleAddBooking}
-            onNavigateToClubs={() => setActiveTab('clubs')}
-          />
-        )}
+      {/* Main App Content with Smooth Page Transitions */}
+      <main className="flex-1 bg-[#f8fafc] relative overflow-hidden">
+        <AnimatePresence mode="wait">
+          {activeTab === 'booking' && (
+            <motion.div
+              key="tab-booking"
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -18 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <BookingSection
+                courts={courts}
+                clubs={clubs}
+                bookings={bookings}
+                currentUser={currentUser}
+                initialBookingType={selectedBookingType}
+                onBookingTypeChange={setSelectedBookingType}
+                onAddBooking={handleAddBooking}
+                onNavigateToClubs={() => setActiveTab('clubs')}
+              />
+            </motion.div>
+          )}
 
-        {activeTab === 'clubs' && (
-          <ClubsSection
-            clubs={clubs}
-            currentUser={currentUser}
-            onOpenAdminClubModal={() => {
-              setActiveTab('admin');
-            }}
-            isAdmin={isAdmin}
-          />
-        )}
+          {activeTab === 'clubs' && (
+            <motion.div
+              key="tab-clubs"
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -18 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <ClubsSection
+                clubs={clubs}
+                currentUser={currentUser}
+                onOpenAdminClubModal={() => setActiveTab('admin')}
+                isAdmin={isAdmin}
+              />
+            </motion.div>
+          )}
 
-        {activeTab === 'minitour' && (
-          <MinitourSection
-            minitours={minitours}
-            currentUser={currentUser}
-            onRegisterTeam={handleRegisterTournamentTeam}
-          />
-        )}
+          {activeTab === 'minitour' && (
+            <motion.div
+              key="tab-minitour"
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -18 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <MinitourSection
+                minitours={minitours}
+                currentUser={currentUser}
+                onRegisterTeam={handleRegisterTournamentTeam}
+              />
+            </motion.div>
+          )}
 
-        {activeTab === 'admin' && (
-          <AdminPanel
-            clubs={clubs}
-            bookings={bookings}
-            minitours={minitours}
-            courts={courts}
-            currentUser={currentUser}
-            onAddClub={handleAddClub}
-            onUpdateBookingStatus={handleUpdateBookingStatus}
-            onAddMinitour={handleAddMinitour}
-            onUpdateMatchScore={handleUpdateMatchScore}
-            onSwitchToAdmin={() => handleLogin(DEFAULT_ADMIN_USER)}
-            onNavigateToBooking={() => setActiveTab('booking')}
-          />
-        )}
+          {activeTab === 'admin' && (
+            <motion.div
+              key="tab-admin"
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -18 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <AdminPanel
+                clubs={clubs}
+                bookings={bookings}
+                minitours={minitours}
+                courts={courts}
+                currentUser={currentUser}
+                onAddClub={handleAddClub}
+                onUpdateBookingStatus={handleUpdateBookingStatus}
+                onRescheduleBooking={handleRescheduleBooking}
+                onBlockCourt={handleBlockCourt}
+                onAddMinitour={handleAddMinitour}
+                onUpdateMatchScore={handleUpdateMatchScore}
+                onSwitchToAdmin={() => handleLogin(DEFAULT_ADMIN_USER)}
+                onNavigateToBooking={() => setActiveTab('booking')}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
 
       {/* Footer */}

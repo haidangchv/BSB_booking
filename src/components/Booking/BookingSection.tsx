@@ -4,12 +4,14 @@ import {
   Calendar, Clock, CheckCircle2, Shield, Sparkles, MapPin, 
   Users, Award, ChevronRight, Info, AlertCircle, QrCode, 
   CreditCard, Phone, User as UserIcon, Check, RefreshCw, Layers, ArrowRight,
-  Flame, Trophy, Search, AlertTriangle, Timer, X, Copy, ExternalLink
+  Flame, Trophy, Search, AlertTriangle, Timer, X, Copy, ExternalLink, Mail, Send
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Court, Booking, BookingType, Club, BookingStatus, User } from '../../types';
+import { Court, Booking, BookingType, Club, BookingStatus, User, EmailNotification } from '../../types';
 import { BSB_INFO, BSB_COLORS, EVENT_SERVICES } from '../../data/mockData';
 import { checkSlotConflict } from '../../lib/supabase';
+import { EmailService } from '../../lib/emailService';
+import { EmailPreviewModal } from '../Email/EmailPreviewModal';
 import { BSBLogo } from '../BSBLogo';
 
 interface BookingSectionProps {
@@ -20,6 +22,7 @@ interface BookingSectionProps {
   initialBookingType?: BookingType;
   onAddBooking: (booking: Booking) => void;
   onNavigateToClubs?: () => void;
+  onBookingTypeChange?: (type: BookingType) => void;
 }
 
 export const BookingSection: React.FC<BookingSectionProps> = ({
@@ -29,7 +32,8 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
   currentUser,
   initialBookingType = 'casual',
   onAddBooking,
-  onNavigateToClubs
+  onNavigateToClubs,
+  onBookingTypeChange
 }) => {
   // 5 Booking Types: 'clb' | 'minitour' | 'fixed' | 'casual' | 'event'
   const [bookingType, setBookingType] = useState<BookingType>(initialBookingType);
@@ -39,6 +43,12 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
       setBookingType(initialBookingType);
     }
   }, [initialBookingType]);
+
+  const handleSwitchBookingType = (type: BookingType) => {
+    setBookingType(type);
+    setSelectedSlots([]);
+    onBookingTypeChange?.(type);
+  };
   const [viewMode, setViewMode] = useState<'day' | 'week'>('day');
   const [filterCourtId, setFilterCourtId] = useState<string>('all');
   const [filterType, setFilterType] = useState<string>('all');
@@ -123,14 +133,22 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
   // Success Modal & Details
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState<boolean>(false);
   const [lastCreatedBooking, setLastCreatedBooking] = useState<Booking | null>(null);
+  const [lastCreatedEmail, setLastCreatedEmail] = useState<EmailNotification | null>(null);
+  const [previewEmail, setPreviewEmail] = useState<EmailNotification | null>(null);
+  const [isPreviewEmailOpen, setIsPreviewEmailOpen] = useState<boolean>(false);
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
 
-  // Available time slots from 05:30 to 23:00
+  // Available time slots from 05:30 to 23:00 (30-minute intervals)
   const timeSlots = useMemo(() => [
-    '05:30 - 06:30', '06:30 - 07:30', '07:30 - 08:30', '08:30 - 09:30',
-    '09:30 - 10:30', '10:30 - 11:30', '11:30 - 12:30', '13:00 - 14:00',
-    '14:00 - 15:00', '15:00 - 16:00', '16:00 - 17:00', '17:00 - 18:00',
-    '18:00 - 19:00', '19:00 - 20:00', '20:00 - 21:00', '21:00 - 22:00', '22:00 - 23:00'
+    '05:30 - 06:00', '06:00 - 06:30', '06:30 - 07:00', '07:00 - 07:30',
+    '07:30 - 08:00', '08:00 - 08:30', '08:30 - 09:00', '09:00 - 09:30',
+    '09:30 - 10:00', '10:00 - 10:30', '10:30 - 11:00', '11:00 - 11:30',
+    '11:30 - 12:00', '12:00 - 12:30', '12:30 - 13:00', '13:00 - 13:30',
+    '13:30 - 14:00', '14:00 - 14:30', '14:30 - 15:00', '15:00 - 15:30',
+    '15:30 - 16:00', '16:00 - 16:30', '16:30 - 17:00', '17:00 - 17:30',
+    '17:30 - 18:00', '18:00 - 18:30', '18:30 - 19:00', '19:00 - 19:30',
+    '19:30 - 20:00', '20:00 - 20:30', '20:30 - 21:00', '21:00 - 21:30',
+    '21:30 - 22:00', '22:00 - 22:30', '22:30 - 23:00'
   ], []);
 
   // Quick 7 days for day selector
@@ -239,18 +257,20 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
     return previewList;
   }, [fixedCourt, fixedStartDate, fixedDurationMonths, fixedDays, fixedTimeSlot, bookings, fixedCourtId]);
 
-  // Pricing for Casual
+  // Pricing for Casual (each slot = 30 mins = 0.5 hours)
   const casualPricing = useMemo(() => {
     if (!selectedCourt) return { courtTotal: 0, addOns: 0, total: 0 };
     let courtTotal = 0;
     selectedSlots.forEach(slot => {
-      const hour = parseInt(slot.split(':')[0], 10);
-      const isPeak = hour >= 16;
-      courtTotal += isPeak ? selectedCourt.hourlyRatePeak : selectedCourt.hourlyRateNormal;
+      const [startH] = slot.split(' - ')[0].split(':').map(Number);
+      const isPeak = startH >= 16;
+      const rate = isPeak ? selectedCourt.hourlyRatePeak : selectedCourt.hourlyRateNormal;
+      courtTotal += Math.round(rate * 0.5);
     });
-    const addOns = (rentPaddle * 40000 * selectedSlots.length) + 
+    const totalHours = selectedSlots.length * 0.5;
+    const addOns = (rentPaddle * 40000 * Math.max(1, totalHours)) + 
                     (rentBalls ? 30000 : 0) + 
-                    (rentBallMachine ? 100000 * selectedSlots.length : 0);
+                    (rentBallMachine ? 100000 * totalHours : 0);
     return { courtTotal, addOns, total: courtTotal + addOns };
   }, [selectedCourt, selectedSlots, rentPaddle, rentBalls, rentBallMachine]);
 
@@ -259,9 +279,10 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
     if (!selectedCourt) return { courtTotal: 0, discount: 0, total: 0 };
     let raw = 0;
     selectedSlots.forEach(slot => {
-      const hour = parseInt(slot.split(':')[0], 10);
-      const isPeak = hour >= 16;
-      raw += isPeak ? selectedCourt.hourlyRatePeak : selectedCourt.hourlyRateNormal;
+      const [startH] = slot.split(' - ')[0].split(':').map(Number);
+      const isPeak = startH >= 16;
+      const rate = isPeak ? selectedCourt.hourlyRatePeak : selectedCourt.hourlyRateNormal;
+      raw += Math.round(rate * 0.5);
     });
     const discount = Math.round(raw * 0.10); // 10% off for verified clubs
     return { courtTotal: raw, discount, total: Math.max(0, raw - discount) };
@@ -356,15 +377,15 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
         courtId: selectedCourtId,
         courtName: selectedCourt.name,
         courtIds: [selectedCourtId],
-        customerName: clubContactPerson || selectedClub.leaderName,
-        customerPhone: selectedClub.leaderPhone,
-        customerEmail: selectedClub.email,
+        customerName: customerName || clubContactPerson || selectedClub.leaderName,
+        customerPhone: customerPhone || selectedClub.leaderPhone,
+        customerEmail: customerEmail || selectedClub.email || currentUser?.email || 'clb@bsbpickleball.vn',
         clubId: selectedClub.id,
         clubName: selectedClub.name,
         date: selectedDate,
         startTime,
         endTime,
-        durationHours: selectedSlots.length,
+        durationHours: selectedSlots.length * 0.5,
         subtotal: clbPricing.courtTotal,
         discountAmount: clbPricing.discount,
         totalAmount: clbPricing.total,
@@ -411,6 +432,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
         courtIds: minitourCourts,
         customerName: minitourOrganizer,
         customerPhone: minitourPhone,
+        customerEmail: customerEmail || currentUser?.email || 'minitour@bsbpickleball.vn',
         title: minitourTitle,
         organizerName: minitourOrganizer,
         teamCount: minitourTeamsCount,
@@ -452,7 +474,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
         courtIds: [fixedCourtId],
         customerName,
         customerPhone,
-        customerEmail,
+        customerEmail: customerEmail || currentUser?.email || 'khachhang@bsbpickleball.vn',
         date: fixedStartDate,
         startTime,
         endTime,
@@ -514,11 +536,11 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
         courtIds: [selectedCourtId],
         customerName,
         customerPhone,
-        customerEmail,
+        customerEmail: customerEmail || currentUser?.email || 'khachhang@bsbpickleball.vn',
         date: selectedDate,
         startTime,
         endTime,
-        durationHours: selectedSlots.length,
+        durationHours: selectedSlots.length * 0.5,
         subtotal: casualPricing.courtTotal,
         discountAmount: 0,
         totalAmount: casualPricing.total,
@@ -559,7 +581,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
         courtIds: eventSelectedCourts,
         customerName,
         customerPhone,
-        customerEmail,
+        customerEmail: customerEmail || currentUser?.email || 'event@bsbpickleball.vn',
         title: eventTitle,
         organizerName: customerName,
         participantCount: eventAttendees,
@@ -589,6 +611,16 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
     setIsSuccessModalOpen(true);
     setSelectedSlots([]);
     setHoldSecondsLeft(null);
+
+    // Send transactional email notification
+    try {
+      const emailStatus = newBooking.bookingStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PENDING';
+      EmailService.sendBookingConfirmationEmail(newBooking, emailStatus).then(sentEmail => {
+        setLastCreatedEmail(sentEmail);
+      });
+    } catch (err) {
+      console.warn('Could not dispatch booking email notification:', err);
+    }
 
     // Confetti effect
     try {
@@ -624,68 +656,98 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
 
       {/* 5 Main Booking Segmented Tabs according to PRD */}
       <div className="flex justify-center mb-8">
-        <div className="inline-flex p-1.5 bg-slate-100 rounded-2xl border border-slate-200 gap-1 max-w-4xl w-full overflow-x-auto shadow-xs">
+        <div className="inline-flex p-1.5 bg-slate-100/90 rounded-2xl border border-slate-200 gap-1 max-w-4xl w-full overflow-x-auto shadow-xs">
           {/* 1. CLB */}
           <button
-            onClick={() => { setBookingType('clb'); setSelectedSlots([]); }}
-            className={`flex-1 py-2.5 px-3 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
-              bookingType === 'clb'
-                ? 'bg-[#11385E] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            type="button"
+            onClick={() => handleSwitchBookingType('clb')}
+            className={`relative flex-1 py-2.5 px-3 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer z-10 ${
+              bookingType === 'clb' ? 'text-white' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
             }`}
           >
+            {bookingType === 'clb' && (
+              <motion.div
+                layoutId="booking-type-indicator"
+                className="absolute inset-0 bg-[#11385E] rounded-xl -z-10 shadow-sm"
+                transition={{ type: "spring", stiffness: 450, damping: 35 }}
+              />
+            )}
             <Users className="w-4 h-4 text-sky-400" />
             <span>1. CLB ({activeClubs.length})</span>
           </button>
 
           {/* 2. Minitour */}
           <button
-            onClick={() => { setBookingType('minitour'); setSelectedSlots([]); }}
-            className={`flex-1 py-2.5 px-3 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
-              bookingType === 'minitour'
-                ? 'bg-[#3E5168] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            type="button"
+            onClick={() => handleSwitchBookingType('minitour')}
+            className={`relative flex-1 py-2.5 px-3 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer z-10 ${
+              bookingType === 'minitour' ? 'text-white' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
             }`}
           >
+            {bookingType === 'minitour' && (
+              <motion.div
+                layoutId="booking-type-indicator"
+                className="absolute inset-0 bg-[#3E5168] rounded-xl -z-10 shadow-sm"
+                transition={{ type: "spring", stiffness: 450, damping: 35 }}
+              />
+            )}
             <Trophy className="w-4 h-4 text-amber-400" />
             <span>2. Minitour</span>
           </button>
 
           {/* 3. Cố định */}
           <button
-            onClick={() => { setBookingType('fixed'); setSelectedSlots([]); }}
-            className={`flex-1 py-2.5 px-3 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
-              bookingType === 'fixed'
-                ? 'bg-[#676F84] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            type="button"
+            onClick={() => handleSwitchBookingType('fixed')}
+            className={`relative flex-1 py-2.5 px-3 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer z-10 ${
+              bookingType === 'fixed' ? 'text-white' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
             }`}
           >
+            {bookingType === 'fixed' && (
+              <motion.div
+                layoutId="booking-type-indicator"
+                className="absolute inset-0 bg-[#676F84] rounded-xl -z-10 shadow-sm"
+                transition={{ type: "spring", stiffness: 450, damping: 35 }}
+              />
+            )}
             <Calendar className="w-4 h-4 text-emerald-400" />
             <span>3. Cố Định (-20%)</span>
           </button>
 
           {/* 4. Vãng lai */}
           <button
-            onClick={() => { setBookingType('casual'); setSelectedSlots([]); }}
-            className={`flex-1 py-2.5 px-3 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
-              bookingType === 'casual'
-                ? 'bg-[#A0AEBC] text-[#11385E] shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            type="button"
+            onClick={() => handleSwitchBookingType('casual')}
+            className={`relative flex-1 py-2.5 px-3 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer z-10 ${
+              bookingType === 'casual' ? 'text-[#11385E]' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
             }`}
           >
+            {bookingType === 'casual' && (
+              <motion.div
+                layoutId="booking-type-indicator"
+                className="absolute inset-0 bg-[#A0AEBC] rounded-xl -z-10 shadow-sm"
+                transition={{ type: "spring", stiffness: 450, damping: 35 }}
+              />
+            )}
             <Clock className="w-4 h-4 text-[#11385E]" />
             <span>4. Vãng Lai</span>
           </button>
 
           {/* 5. Sự kiện */}
           <button
-            onClick={() => { setBookingType('event'); setSelectedSlots([]); }}
-            className={`flex-1 py-2.5 px-3 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
-              bookingType === 'event'
-                ? 'bg-[#647A82] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+            type="button"
+            onClick={() => handleSwitchBookingType('event')}
+            className={`relative flex-1 py-2.5 px-3 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer z-10 ${
+              bookingType === 'event' ? 'text-white' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
             }`}
           >
+            {bookingType === 'event' && (
+              <motion.div
+                layoutId="booking-type-indicator"
+                className="absolute inset-0 bg-[#647A82] rounded-xl -z-10 shadow-sm"
+                transition={{ type: "spring", stiffness: 450, damping: 35 }}
+              />
+            )}
             <Award className="w-4 h-4 text-indigo-300" />
             <span>5. Sự Kiện</span>
           </button>
@@ -720,11 +782,20 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 1. CLB BOOKING FORM (Strictly Selected from Admin List - NO Create Input) */}
-      {/* ========================================================================= */}
-      {bookingType === 'clb' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {/* 5 Dynamic Booking Forms with AnimatePresence */}
+      <AnimatePresence mode="wait">
+        {/* ========================================================================= */}
+        {/* 1. CLB BOOKING FORM (Strictly Selected from Admin List - NO Create Input) */}
+        {/* ========================================================================= */}
+        {bookingType === 'clb' && (
+          <motion.div
+            key="clb"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.28, ease: "easeOut" }}
+            className="grid grid-cols-1 lg:grid-cols-12 gap-8"
+          >
           <div className="lg:col-span-8 space-y-6">
             {/* Step 1: Search & Select Existing Active Club */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
@@ -866,8 +937,8 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
 
               {/* Time Slots Matrix */}
               <div>
-                <p className="text-xs font-bold text-slate-700 mb-2">Chọn khung giờ sinh hoạt (có thể chọn nhiều tiếng liên tiếp):</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                <p className="text-xs font-bold text-slate-700 mb-2">Chọn khung giờ sinh hoạt (slot 30 phút, có thể chọn nhiều slot liên tiếp):</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                   {timeSlots.map((slot) => {
                     const bookingInfo = getSlotBookingInfo(selectedCourtId, slot, selectedDate);
                     const isSelected = selectedSlots.includes(slot);
@@ -927,6 +998,43 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
 
               <div className="space-y-3 mb-4 text-xs">
                 <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-700">Thông tin người đặt sân:</label>
+                    {currentUser && (
+                      <span className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-amber-500" /> Tự động điền
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <input
+                      type="text"
+                      placeholder="Họ và tên *"
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-[#11385E] focus:outline-none"
+                    />
+                    <input
+                      type="tel"
+                      placeholder="Số điện thoại *"
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-[#11385E] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">Email nhận xác nhận *</label>
+                    <input
+                      type="email"
+                      placeholder="email@example.com"
+                      value={customerEmail}
+                      onChange={(e) => setCustomerEmail(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-[#11385E] focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
                   <label className="block font-bold text-slate-700 mb-1">Người liên hệ buổi chơi (không bắt buộc):</label>
                   <input
                     type="text"
@@ -953,7 +1061,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
               <div className="border-t border-slate-100 pt-3 space-y-1.5 text-xs mb-4">
                 <div className="flex justify-between text-slate-600">
                   <span>Thời lượng:</span>
-                  <span>{selectedSlots.length} giờ ({selectedCourt?.name})</span>
+                  <span>{selectedSlots.length * 0.5} giờ ({selectedSlots.length} slot) - {selectedCourt?.name}</span>
                 </div>
                 <div className="flex justify-between text-slate-600">
                   <span>Giá gốc:</span>
@@ -984,14 +1092,21 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {/* ========================================================================= */}
       {/* 2. MINITOUR BOOKING FORM */}
       {/* ========================================================================= */}
       {bookingType === 'minitour' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <motion.div
+          key="minitour"
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -15 }}
+          transition={{ duration: 0.28, ease: "easeOut" }}
+          className="grid grid-cols-1 lg:grid-cols-12 gap-8"
+        >
           <div className="lg:col-span-8 space-y-6">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2 mb-4">
@@ -1029,6 +1144,17 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                     value={minitourPhone}
                     onChange={(e) => setMinitourPhone(e.target.value)}
                     placeholder="0908 123 456"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#3E5168] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Email nhận xác nhận *</label>
+                  <input
+                    type="email"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    placeholder="email@example.com"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#3E5168] focus:outline-none"
                   />
                 </div>
@@ -1132,14 +1258,21 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {/* ========================================================================= */}
       {/* 3. FIXED (CỐ ĐỊNH) BOOKING FORM WITH CONFLICT PREVIEW */}
       {/* ========================================================================= */}
       {bookingType === 'fixed' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <motion.div
+          key="fixed"
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -15 }}
+          transition={{ duration: 0.28, ease: "easeOut" }}
+          className="grid grid-cols-1 lg:grid-cols-12 gap-8"
+        >
           <div className="lg:col-span-8 space-y-6">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
               <div className="flex items-center justify-between mb-4">
@@ -1341,12 +1474,43 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
 
           <div className="lg:col-span-4">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs sticky top-24">
-              <h3 className="text-base font-extrabold text-[#676F84] mb-4 pb-3 border-b border-slate-100 flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-emerald-600" />
-                Hợp Đồng Cố Định
-              </h3>
+              <div className="space-y-3 mb-4 text-xs">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-700">Đại diện ký hợp đồng:</label>
+                    {currentUser && (
+                      <span className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-amber-500" /> Tự động điền
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Họ và tên / Đơn vị *"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-[#676F84] focus:outline-none mb-2"
+                  />
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <input
+                      type="tel"
+                      placeholder="Số điện thoại *"
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-[#676F84] focus:outline-none"
+                    />
+                    <input
+                      type="email"
+                      placeholder="Email nhận xác nhận *"
+                      value={customerEmail}
+                      onChange={(e) => setCustomerEmail(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-[#676F84] focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
 
-              <div className="space-y-2 text-xs text-slate-600 mb-4">
+              <div className="space-y-2 text-xs text-slate-600 mb-4 border-t border-slate-100 pt-3">
                 <div className="flex justify-between">
                   <span>Tổng số buổi:</span>
                   <strong className="text-slate-900">{fixedPricing.sessionsCount} Buổi</strong>
@@ -1383,14 +1547,21 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {/* ========================================================================= */}
       {/* 4. CASUAL (VÃNG LAI) BOOKING FORM */}
       {/* ========================================================================= */}
       {bookingType === 'casual' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <motion.div
+          key="casual"
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -15 }}
+          transition={{ duration: 0.28, ease: "easeOut" }}
+          className="grid grid-cols-1 lg:grid-cols-12 gap-8"
+        >
           <div className="lg:col-span-8 space-y-6">
             {/* Step 1: Date */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
@@ -1482,9 +1653,9 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2 mb-3">
                 <Clock className="w-4 h-4 text-[#11385E]" />
-                Bước 3: Chọn Khung Giờ Trống (Slot 60 phút)
+                Bước 3: Chọn Khung Giờ Trống (Slot 30 phút)
               </span>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                 {timeSlots.map((slot) => {
                   const bookingInfo = getSlotBookingInfo(selectedCourtId, slot, selectedDate);
                   const isSelected = selectedSlots.includes(slot);
@@ -1522,7 +1693,14 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
 
               <div className="space-y-3 mb-4 text-xs">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Họ và tên người đặt *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-700">Họ và tên người đặt *</label>
+                    {currentUser && (
+                      <span className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-amber-500" /> Tự động điền
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     placeholder="Nguyễn Văn A"
@@ -1539,6 +1717,17 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                     placeholder="0908 123 456"
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#11385E] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Email nhận xác nhận *</label>
+                  <input
+                    type="email"
+                    placeholder="email@example.com"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#11385E] focus:outline-none"
                   />
                 </div>
@@ -1563,7 +1752,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                 </div>
                 <div className="flex justify-between text-slate-600">
                   <span>Số slot đã chọn:</span>
-                  <span>{selectedSlots.length} giờ</span>
+                  <span>{selectedSlots.length} slot ({selectedSlots.length * 0.5} giờ)</span>
                 </div>
                 <div className="flex justify-between text-sm font-extrabold text-slate-900 pt-1 border-t border-slate-100">
                   <span>Tổng tiền sân:</span>
@@ -1586,14 +1775,21 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {/* ========================================================================= */}
       {/* 5. EVENT (SỰ KIỆN) BOOKING FORM */}
       {/* ========================================================================= */}
       {bookingType === 'event' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <motion.div
+          key="event"
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -15 }}
+          transition={{ duration: 0.28, ease: "easeOut" }}
+          className="grid grid-cols-1 lg:grid-cols-12 gap-8"
+        >
           <div className="lg:col-span-8 space-y-6">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2 mb-4">
@@ -1631,6 +1827,17 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
                     placeholder="0908 123 456"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#647A82] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Email nhận xác nhận *</label>
+                  <input
+                    type="email"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    placeholder="email@example.com"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#647A82] focus:outline-none"
                   />
                 </div>
@@ -1729,8 +1936,9 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {/* ========================================================================= */}
       {/* SUCCESS MODAL & VIETQR PAYMENT CHECKOUT */}
@@ -1785,6 +1993,36 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                 </div>
               </div>
 
+              {/* Email Sent Confirmation Card */}
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 mb-5 text-xs flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl shrink-0">
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-emerald-900">Email xác nhận đã được gửi!</div>
+                    <div className="text-[11px] text-emerald-700">
+                      Gửi tới: <strong className="font-semibold">{lastCreatedBooking.customerEmail || 'khachhang@bsbpickleball.vn'}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const em = lastCreatedEmail || EmailService.getEmailByBookingId(lastCreatedBooking.id);
+                    if (em) {
+                      setPreviewEmail(em);
+                      setIsPreviewEmailOpen(true);
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-xs shrink-0"
+                >
+                  <Send className="w-3 h-3" />
+                  Xem Email
+                </button>
+              </div>
+
               {/* VietQR Quick Payment Details */}
               <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-4 mb-6 text-xs space-y-2">
                 <div className="flex justify-between text-slate-600">
@@ -1813,6 +2051,13 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Transactional Email Preview Modal */}
+      <EmailPreviewModal
+        isOpen={isPreviewEmailOpen}
+        onClose={() => setIsPreviewEmailOpen(false)}
+        email={previewEmail}
+      />
     </section>
   );
 };

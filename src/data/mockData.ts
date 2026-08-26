@@ -15,8 +15,8 @@ export const BSB_INFO = {
   email: 'contact@bsbpickleball.vn',
   address: 'Số 18 Đường Thể Thao, Khu Đô Thị Xanh, TP. Hồ Chí Minh',
   openHours: '05:30 - 23:00 (Mở cửa 7 ngày trong tuần)',
-  slotDurationMinutes: 60,
-  minBookingDurationMinutes: 60,
+  slotDurationMinutes: 30,
+  minBookingDurationMinutes: 30,
   maxBookingDurationMinutes: 300,
   holdDurationMinutes: 5,
   bankInfo: {

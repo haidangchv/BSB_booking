@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
-import { motion } from 'motion/react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShieldCheck, Users, Calendar, Trophy, Plus, Check, 
   Trash2, Edit, CheckCircle2, Clock, X, DollarSign, 
   Activity, Layers, AlertCircle, FileText, Database, 
-  RefreshCw, Lock, Sparkles, AlertTriangle, ArrowUpRight
+  RefreshCw, Lock, Sparkles, AlertTriangle, ArrowUpRight,
+  Ban, Unlock, CalendarClock, ArrowRightLeft, Mail, Send, Search
 } from 'lucide-react';
-import { Club, Booking, Minitour, Court, BookingType, BookingStatus, User } from '../../types';
-import { DatabaseService, isSupabaseConfigured } from '../../lib/supabase';
+import { Club, Booking, Minitour, Court, BookingType, BookingStatus, User, CourtBlock, EmailNotification } from '../../types';
+import { DatabaseService, isSupabaseConfigured, checkSlotConflict } from '../../lib/supabase';
+import { EmailService } from '../../lib/emailService';
+import { EmailPreviewModal } from '../Email/EmailPreviewModal';
 
 interface AdminPanelProps {
   clubs: Club[];
@@ -17,6 +20,8 @@ interface AdminPanelProps {
   currentUser?: User | null;
   onAddClub: (club: Club) => void;
   onUpdateBookingStatus: (id: string, status: BookingStatus) => void;
+  onRescheduleBooking: (bookingId: string, newDate: string, newStartTime: string, newEndTime: string, newCourtId?: string, newCourtName?: string) => void;
+  onBlockCourt: (courtId: string, date: string, startTime: string, endTime: string, reason: string) => string[];
   onAddMinitour: (tour: Minitour) => void;
   onUpdateMatchScore: (tourId: string, matchId: string, s1: number, s2: number, winnerId?: string) => void;
   onSwitchToAdmin?: () => void;
@@ -31,12 +36,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   currentUser,
   onAddClub,
   onUpdateBookingStatus,
+  onRescheduleBooking,
+  onBlockCourt,
   onAddMinitour,
   onUpdateMatchScore,
   onSwitchToAdmin,
   onNavigateToBooking
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'clubs' | 'bookings' | 'minitours' | 'database' | 'stats'>('clubs');
+  const [activeAdminTab, setActiveAdminTab] = useState<'clubs' | 'bookings' | 'courts' | 'minitours' | 'database' | 'stats' | 'emails'>('bookings');
+
+  // Email Outbox & Preview State
+  const [outboxEmails, setOutboxEmails] = useState<EmailNotification[]>(() => EmailService.getEmailOutbox());
+  const [emailSearchTerm, setEmailSearchTerm] = useState('');
+  const [previewEmail, setPreviewEmail] = useState<EmailNotification | null>(null);
+  const [isPreviewEmailOpen, setIsPreviewEmailOpen] = useState(false);
+
+  useEffect(() => {
+    const handleOutboxUpdate = () => {
+      setOutboxEmails(EmailService.getEmailOutbox());
+    };
+    window.addEventListener('bsb_email_outbox_updated', handleOutboxUpdate);
+    return () => window.removeEventListener('bsb_email_outbox_updated', handleOutboxUpdate);
+  }, []);
 
   // Role Guard Check: If not logged in or role is not admin
   const isUserAdmin = currentUser?.role === 'admin';
@@ -67,6 +88,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Filter Bookings
   const [bookingFilter, setBookingFilter] = useState<'all' | BookingType>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  // Reschedule Modal State
+  const [rescheduleBooking, setRescheduleBooking] = useState<Booking | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleStart, setRescheduleStart] = useState('');
+  const [rescheduleEnd, setRescheduleEnd] = useState('');
+  const [rescheduleCourtId, setRescheduleCourtId] = useState('');
+  const [rescheduleError, setRescheduleError] = useState('');
+
+  // Court Block Modal State
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [blockCourtId, setBlockCourtId] = useState('');
+  const [blockDate, setBlockDate] = useState(new Date().toISOString().split('T')[0]);
+  const [blockStartTime, setBlockStartTime] = useState('08:00');
+  const [blockEndTime, setBlockEndTime] = useState('12:00');
+  const [blockReason, setBlockReason] = useState('');
+  const [blockConflicts, setBlockConflicts] = useState<Booking[]>([]);
+  const [blockStep, setBlockStep] = useState<'form' | 'confirm'>('form');
+
+  // Court blocks stored in localStorage
+  const [courtBlocks, setCourtBlocks] = useState<CourtBlock[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('bsb_court_blocks_v2') || '[]');
+    } catch { return []; }
+  });
 
   const handleCreateClubSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,6 +182,106 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     onAddMinitour(tour);
     setShowAddTourModal(false);
     setNewTourTitle('');
+  };
+
+  // ========== RESCHEDULE BOOKING HANDLERS ==========
+  const openRescheduleModal = (booking: Booking) => {
+    setRescheduleBooking(booking);
+    setRescheduleDate(booking.date);
+    setRescheduleStart(booking.startTime);
+    setRescheduleEnd(booking.endTime);
+    setRescheduleCourtId(booking.courtId);
+    setRescheduleError('');
+  };
+
+  const handleRescheduleSubmit = () => {
+    if (!rescheduleBooking) return;
+    if (!rescheduleDate || !rescheduleStart || !rescheduleEnd) {
+      setRescheduleError('Vui lòng điền đầy đủ ngày và giờ mới.');
+      return;
+    }
+    // Check conflict
+    const courtId = rescheduleCourtId || rescheduleBooking.courtId;
+    const conflict = checkSlotConflict(bookings, {
+      courtIds: [courtId],
+      date: rescheduleDate,
+      startTime: rescheduleStart,
+      endTime: rescheduleEnd,
+      excludeBookingId: rescheduleBooking.id
+    });
+    if (conflict.hasConflict) {
+      setRescheduleError(`⚠️ Trùng lịch: ${conflict.reason}`);
+      return;
+    }
+    const selectedCourt = courts.find(c => c.id === courtId);
+    onRescheduleBooking(
+      rescheduleBooking.id,
+      rescheduleDate,
+      rescheduleStart,
+      rescheduleEnd,
+      courtId,
+      selectedCourt?.name || rescheduleBooking.courtName
+    );
+    setRescheduleBooking(null);
+  };
+
+  // ========== COURT BLOCK HANDLERS ==========
+  const openBlockModal = (courtId?: string) => {
+    setShowBlockModal(true);
+    setBlockCourtId(courtId || (courts[0]?.id || ''));
+    setBlockDate(new Date().toISOString().split('T')[0]);
+    setBlockStartTime('08:00');
+    setBlockEndTime('12:00');
+    setBlockReason('');
+    setBlockConflicts([]);
+    setBlockStep('form');
+  };
+
+  const handleBlockCheck = () => {
+    if (!blockCourtId || !blockDate || !blockStartTime || !blockEndTime || !blockReason.trim()) {
+      return;
+    }
+    // Find conflicting bookings
+    const parseMin = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + (m || 0);
+    };
+    const bStart = parseMin(blockStartTime);
+    const bEnd = parseMin(blockEndTime);
+    const conflicts = bookings.filter(b => {
+      if (b.date !== blockDate) return false;
+      if (b.bookingStatus === 'CANCELLED' || b.bookingStatus === 'REJECTED') return false;
+      const bCourtIds = b.courtIds && b.courtIds.length > 0 ? b.courtIds : [b.courtId];
+      if (!bCourtIds.includes(blockCourtId)) return false;
+      const s = parseMin(b.startTime);
+      const e = parseMin(b.endTime);
+      return Math.max(bStart, s) < Math.min(bEnd, e);
+    });
+
+    if (conflicts.length > 0) {
+      setBlockConflicts(conflicts);
+      setBlockStep('confirm');
+    } else {
+      // No conflicts, block directly
+      handleBlockConfirm();
+    }
+  };
+
+  const handleBlockConfirm = () => {
+    const conflictingIds = onBlockCourt(blockCourtId, blockDate, blockStartTime, blockEndTime, blockReason);
+    // Reload blocks from localStorage
+    try {
+      setCourtBlocks(JSON.parse(localStorage.getItem('bsb_court_blocks_v2') || '[]'));
+    } catch { /* ignore */ }
+    setShowBlockModal(false);
+    setBlockConflicts([]);
+    setBlockStep('form');
+  };
+
+  const handleRemoveBlock = (blockId: string) => {
+    const updated = courtBlocks.filter(b => b.id !== blockId);
+    setCourtBlocks(updated);
+    localStorage.setItem('bsb_court_blocks_v2', JSON.stringify(updated));
   };
 
   const filteredBookings = bookings.filter(b => {
@@ -251,18 +397,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* Admin Tabs */}
       <div className="flex border border-slate-200 bg-slate-100 rounded-xl p-1 shadow-xs mb-6 gap-1 overflow-x-auto">
         <button
-          onClick={() => setActiveAdminTab('clubs')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-xs md:text-sm transition-all whitespace-nowrap cursor-pointer ${
-            activeAdminTab === 'clubs'
-              ? 'bg-white text-[#11385E] shadow-xs border border-slate-200/80'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-          }`}
-        >
-          <Users className="w-4 h-4 text-[#11385E]" />
-          1. Câu Lạc Bộ ({clubs.length})
-        </button>
-
-        <button
           onClick={() => setActiveAdminTab('bookings')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-xs md:text-sm transition-all whitespace-nowrap cursor-pointer ${
             activeAdminTab === 'bookings'
@@ -271,7 +405,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           }`}
         >
           <Calendar className="w-4 h-4 text-[#11385E]" />
-          2. Lịch Đặt Sân ({bookings.length})
+          1. Duyệt Lịch ({bookings.filter(b => b.bookingStatus === 'PENDING').length} chờ)
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('courts')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-xs md:text-sm transition-all whitespace-nowrap cursor-pointer ${
+            activeAdminTab === 'courts'
+              ? 'bg-white text-[#11385E] shadow-xs border border-slate-200/80'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+          }`}
+        >
+          <Layers className="w-4 h-4 text-emerald-600" />
+          2. Quản Lý Sân ({courts.length})
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('clubs')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-xs md:text-sm transition-all whitespace-nowrap cursor-pointer ${
+            activeAdminTab === 'clubs'
+              ? 'bg-white text-[#11385E] shadow-xs border border-slate-200/80'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+          }`}
+        >
+          <Users className="w-4 h-4 text-[#11385E]" />
+          3. Câu Lạc Bộ ({clubs.length})
         </button>
 
         <button
@@ -283,7 +441,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           }`}
         >
           <Trophy className="w-4 h-4 text-amber-500" />
-          3. Minitour & Điểm Số
+          4. Minitour & Điểm Số
         </button>
 
         <button
@@ -295,7 +453,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           }`}
         >
           <Database className="w-4 h-4 text-emerald-600" />
-          4. Supabase & Database SQL
+          5. Database
         </button>
 
         <button
@@ -307,7 +465,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           }`}
         >
           <Activity className="w-4 h-4 text-purple-600" />
-          5. Báo Cáo & Doanh Thu
+          6. Báo Cáo
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('emails')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-xs md:text-sm transition-all whitespace-nowrap cursor-pointer ${
+            activeAdminTab === 'emails'
+              ? 'bg-white text-[#11385E] shadow-xs border border-slate-200/80'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+          }`}
+        >
+          <Mail className="w-4 h-4 text-blue-600" />
+          7. Hộp Thư Email ({outboxEmails.length})
         </button>
       </div>
 
@@ -384,33 +554,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       {/* TAB 2: BOOKINGS MANAGEMENT (ALL 5 TYPES) */}
       {activeAdminTab === 'bookings' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex flex-wrap gap-1.5">
-              {[
-                { id: 'all', label: 'Tất Cả' },
-                { id: 'clb', label: 'CLB' },
-                { id: 'minitour', label: 'Minitour' },
-                { id: 'fixed', label: 'Cố Định' },
-                { id: 'casual', label: 'Vãng Lai' },
-                { id: 'event', label: 'Sự Kiện' }
-              ].map(f => (
-                <button
-                  key={f.id}
-                  onClick={() => setBookingFilter(f.id as any)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                    bookingFilter === f.id
-                      ? 'bg-[#11385E] text-white border-[#11385E]'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-blue-50/70 p-4 rounded-2xl border border-blue-200 gap-3">
+            <div>
+              <h3 className="font-bold text-[#11385E] text-sm">Duyệt & Quản Lý Đặt Sân Tự Động</h3>
+              <p className="text-xs text-slate-600">
+                Theo dõi 5 loại hình: CLB, Minitour, Cố định, Vãng lai, Sự kiện. Tự động gửi email xác nhận cho khách hàng.
+              </p>
             </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">Trạng thái:</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500">Loại hình:</span>
+              <select
+                value={bookingFilter}
+                onChange={(e) => setBookingFilter(e.target.value as any)}
+                className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold"
+              >
+                <option value="all">Tất cả loại hình</option>
+                <option value="clb">Câu Lạc Bộ</option>
+                <option value="minitour">Minitour</option>
+                <option value="fixed">Cố Định</option>
+                <option value="casual">Vãng Lai</option>
+                <option value="event">Sự Kiện</option>
+              </select>
+              <span className="text-xs text-slate-500 ml-1">Trạng thái:</span>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
@@ -436,7 +602,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <th className="p-3.5">Sân & Thời Gian</th>
                   <th className="p-3.5">Tổng Tiền</th>
                   <th className="p-3.5">Trạng Thái</th>
-                  <th className="p-3.5 text-right">Duyệt Sân</th>
+                  <th className="p-3.5 text-right">Duyệt & Thao Tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -461,6 +627,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <td className="p-3.5">
                       <div className="font-bold text-slate-900">{b.customerName}</div>
                       <div className="text-[10px] text-slate-400">{b.customerPhone}</div>
+                      {b.customerEmail && <div className="text-[10px] text-slate-500 font-mono">{b.customerEmail}</div>}
                       {b.clubName && <div className="text-[10px] text-indigo-600 font-medium">{b.clubName}</div>}
                     </td>
                     <td className="p-3.5">
@@ -485,29 +652,193 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         {b.bookingStatus}
                       </span>
                     </td>
-                    <td className="p-3.5 text-right space-x-1">
-                      {b.bookingStatus !== 'CONFIRMED' && (
+                    <td className="p-3.5 text-right">
+                      <div className="flex items-center justify-end gap-1 flex-wrap">
+                        {b.bookingStatus !== 'CONFIRMED' && b.bookingStatus !== 'CANCELLED' && (
+                          <button
+                            onClick={() => onUpdateBookingStatus(b.id, 'CONFIRMED')}
+                            className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold cursor-pointer"
+                          >
+                            ✓ Duyệt
+                          </button>
+                        )}
+                        {b.bookingStatus !== 'CANCELLED' && b.bookingStatus !== 'COMPLETED' && (
+                          <button
+                            onClick={() => openRescheduleModal(b)}
+                            className="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded text-[10px] font-bold cursor-pointer flex items-center gap-0.5"
+                          >
+                            <ArrowRightLeft className="w-3 h-3" />
+                            Đổi giờ
+                          </button>
+                        )}
                         <button
-                          onClick={() => onUpdateBookingStatus(b.id, 'CONFIRMED')}
-                          className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold cursor-pointer"
+                          onClick={async () => {
+                            let em = EmailService.getEmailByBookingId(b.id);
+                            if (!em) {
+                              em = await EmailService.sendBookingConfirmationEmail(b, b.bookingStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PENDING');
+                            }
+                            setPreviewEmail(em);
+                            setIsPreviewEmailOpen(true);
+                          }}
+                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold cursor-pointer flex items-center gap-0.5"
+                          title="Xem email xác nhận"
                         >
-                          Duyệt
+                          <Mail className="w-3 h-3 text-slate-500" />
+                          Email
                         </button>
-                      )}
-                      {b.bookingStatus !== 'CANCELLED' && (
-                        <button
-                          onClick={() => onUpdateBookingStatus(b.id, 'CANCELLED')}
-                          className="px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-[10px] font-bold cursor-pointer"
-                        >
-                          Hủy
-                        </button>
-                      )}
+                        {b.bookingStatus !== 'CANCELLED' && (
+                          <button
+                            onClick={() => onUpdateBookingStatus(b.id, 'CANCELLED')}
+                            className="px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-[10px] font-bold cursor-pointer"
+                          >
+                            Hủy
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* TAB 2: COURTS MANAGEMENT (KHÓA SÂN / BẢO TRÌ) */}
+      {activeAdminTab === 'courts' && (
+        <div className="space-y-6">
+          {/* Court cards grid */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200 gap-3">
+            <div>
+              <h3 className="font-bold text-[#11385E] text-sm">Quản Lý Sân & Khóa Sân / Bảo Trì</h3>
+              <p className="text-xs text-slate-600">
+                Khóa sân trong khung giờ cụ thể. Nếu trùng lịch đã đặt, booking trùng sẽ tự động chuyển về "Chờ duyệt".
+              </p>
+            </div>
+            <button
+              onClick={() => openBlockModal()}
+              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer shrink-0"
+            >
+              <Ban className="w-4 h-4" />
+              + Khóa Sân / Bảo Trì
+            </button>
+          </div>
+
+          {/* Courts overview */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {courts.map(court => {
+              const courtBookingsToday = bookings.filter(
+                b => b.courtId === court.id && b.date === new Date().toISOString().split('T')[0] && b.bookingStatus !== 'CANCELLED' && b.bookingStatus !== 'REJECTED'
+              );
+              const courtBlocksForCourt = courtBlocks.filter(bl => bl.courtId === court.id);
+              return (
+                <div key={court.id} className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                  <div className="p-4 border-b border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-bold text-sm text-[#11385E]">{court.name}</h4>
+                        <p className="text-[10px] text-slate-500">{court.type === 'indoor' ? 'Sân trong nhà' : court.type === 'outdoor' ? 'Sân ngoài trời' : 'Center Court'} • {court.surface.substring(0, 30)}...</p>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        court.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' :
+                        court.status === 'MAINTENANCE' ? 'bg-amber-100 text-amber-700' :
+                        'bg-red-100 text-red-700'
+                      }`}>
+                        {court.status === 'ACTIVE' ? 'Hoạt động' : court.status === 'MAINTENANCE' ? 'Bảo trì' : 'Tạm đóng'}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex items-center gap-3 text-[11px]">
+                      <span className="text-slate-500">Giờ thường: <strong className="text-emerald-600">{court.hourlyRateNormal.toLocaleString('vi-VN')}đ</strong></span>
+                      <span className="text-slate-500">Peak: <strong className="text-amber-600">{court.hourlyRatePeak.toLocaleString('vi-VN')}đ</strong></span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50/50 space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500 font-semibold">Booking hôm nay:</span>
+                      <span className="font-bold text-[#11385E]">{courtBookingsToday.length} lịch</span>
+                    </div>
+                    {courtBlocksForCourt.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-rose-600 font-bold uppercase">Đang khóa:</span>
+                        {courtBlocksForCourt.map(bl => (
+                          <div key={bl.id} className="flex items-center justify-between bg-rose-50 border border-rose-200 rounded-lg px-2 py-1 text-[10px]">
+                            <span className="text-rose-800 font-semibold">{bl.date} • {bl.startTime}-{bl.endTime}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-rose-600">{bl.reason}</span>
+                              <button
+                                onClick={() => handleRemoveBlock(bl.id)}
+                                className="p-0.5 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded cursor-pointer"
+                                title="Gỡ khóa"
+                              >
+                                <Unlock className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {courtBlocksForCourt.length === 0 && (
+                      <button
+                        onClick={() => openBlockModal(court.id)}
+                        className="w-full mt-1 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold cursor-pointer flex items-center justify-center gap-1 transition-colors"
+                      >
+                        <Lock className="w-3 h-3" />
+                        Khóa sân này
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* All court blocks table */}
+          {courtBlocks.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+              <div className="p-3 bg-rose-50 border-b border-rose-200">
+                <h4 className="font-bold text-sm text-rose-900 flex items-center gap-2">
+                  <Ban className="w-4 h-4" />
+                  Danh Sách Sân Đang Khóa / Bảo Trì ({courtBlocks.length})
+                </h4>
+              </div>
+              <table className="w-full text-left text-xs text-slate-700">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase">
+                  <tr>
+                    <th className="p-3">Sân</th>
+                    <th className="p-3">Ngày</th>
+                    <th className="p-3">Giờ</th>
+                    <th className="p-3">Lý do</th>
+                    <th className="p-3">Người tạo</th>
+                    <th className="p-3 text-right">Hành động</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {courtBlocks.map(bl => {
+                    const courtInfo = courts.find(c => c.id === bl.courtId);
+                    return (
+                      <tr key={bl.id} className="hover:bg-slate-50/70">
+                        <td className="p-3 font-bold text-[#11385E]">{courtInfo?.name || bl.courtName || bl.courtId}</td>
+                        <td className="p-3 font-medium">{bl.date}</td>
+                        <td className="p-3">{bl.startTime} - {bl.endTime}</td>
+                        <td className="p-3 text-rose-700 font-semibold">{bl.reason}</td>
+                        <td className="p-3 text-slate-500">{bl.createdBy}</td>
+                        <td className="p-3 text-right">
+                          <button
+                            onClick={() => handleRemoveBlock(bl.id)}
+                            className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded text-[10px] font-bold cursor-pointer flex items-center gap-1 ml-auto"
+                          >
+                            <Unlock className="w-3 h-3" />
+                            Gỡ khóa
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -684,6 +1015,140 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
+      {/* TAB 7: TRANSACTIONAL EMAIL OUTBOX & LOGS */}
+      {activeAdminTab === 'emails' && (
+        <div className="space-y-6">
+          {/* Header & Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <span className="text-xs text-slate-500 font-bold uppercase flex items-center gap-1.5">
+                <Mail className="w-4 h-4 text-blue-600" />
+                Tổng Email Giao Dịch
+              </span>
+              <div className="text-2xl font-extrabold text-[#11385E] mt-2">{outboxEmails.length}</div>
+              <p className="text-[11px] text-slate-500 mt-1">Tự động gửi khi có booking mới / đổi trạng thái</p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <span className="text-xs text-slate-500 font-bold uppercase flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                Tỷ Lệ Gửi Thành Công
+              </span>
+              <div className="text-2xl font-extrabold text-emerald-600 mt-2">100%</div>
+              <p className="text-[11px] text-slate-500 mt-1">Trạng thái SENT đồng bộ tức thì</p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <span className="text-xs text-slate-500 font-bold uppercase flex items-center gap-1.5">
+                <Send className="w-4 h-4 text-amber-500" />
+                Mẫu Email Tự Động
+              </span>
+              <div className="text-2xl font-extrabold text-amber-600 mt-2">5 Mẫu</div>
+              <p className="text-[11px] text-slate-500 mt-1">Pending, Confirmed, Rescheduled, Cancelled, Rejected</p>
+            </div>
+          </div>
+
+          {/* Search Bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Tìm kiếm theo email người nhận, tên khách, mã booking..."
+                value={emailSearchTerm}
+                onChange={(e) => setEmailSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-[#11385E] focus:outline-none"
+              />
+            </div>
+            <button
+              onClick={() => setOutboxEmails(EmailService.getEmailOutbox())}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Làm Mới Hộp Thư
+            </button>
+          </div>
+
+          {/* Email Outbox Table */}
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+            <table className="w-full text-left text-xs text-slate-700">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase">
+                <tr>
+                  <th className="p-3.5">Thời Gian</th>
+                  <th className="p-3.5">Người Nhận (To)</th>
+                  <th className="p-3.5">Mã Booking</th>
+                  <th className="p-3.5">Tiêu Đề / Loại Mẫu</th>
+                  <th className="p-3.5">Trạng Thái</th>
+                  <th className="p-3.5 text-right">Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {outboxEmails
+                  .filter(e => 
+                    !emailSearchTerm || 
+                    e.recipientEmail.toLowerCase().includes(emailSearchTerm.toLowerCase()) ||
+                    e.recipientName.toLowerCase().includes(emailSearchTerm.toLowerCase()) ||
+                    (e.bookingCode && e.bookingCode.toLowerCase().includes(emailSearchTerm.toLowerCase())) ||
+                    e.subject.toLowerCase().includes(emailSearchTerm.toLowerCase())
+                  )
+                  .map(emailItem => (
+                    <tr key={emailItem.id} className="hover:bg-slate-50/70">
+                      <td className="p-3.5 text-slate-500 font-medium">
+                        {new Date(emailItem.sentAt).toLocaleString('vi-VN')}
+                      </td>
+                      <td className="p-3.5">
+                        <div className="font-bold text-slate-900">{emailItem.recipientName}</div>
+                        <div className="text-[10px] text-blue-700 font-mono">{emailItem.recipientEmail}</div>
+                      </td>
+                      <td className="p-3.5 font-mono font-bold text-[#11385E]">
+                        {emailItem.bookingCode || '—'}
+                      </td>
+                      <td className="p-3.5">
+                        <div className="font-bold text-slate-800 line-clamp-1">{emailItem.subject}</div>
+                        <span className={`inline-block mt-0.5 px-2 py-0.2 rounded text-[9px] font-bold uppercase ${
+                          emailItem.templateType === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' :
+                          emailItem.templateType === 'RESCHEDULED' ? 'bg-blue-100 text-blue-800' :
+                          emailItem.templateType === 'CANCELLED' ? 'bg-red-100 text-red-800' :
+                          'bg-amber-100 text-amber-800'
+                        }`}>
+                          {emailItem.templateType}
+                        </span>
+                      </td>
+                      <td className="p-3.5">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 w-max">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          SENT
+                        </span>
+                      </td>
+                      <td className="p-3.5 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => {
+                              setPreviewEmail(emailItem);
+                              setIsPreviewEmailOpen(true);
+                            }}
+                            className="px-2.5 py-1 bg-[#11385E] hover:bg-[#0c2946] text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors flex items-center gap-1"
+                          >
+                            <Mail className="w-3 h-3 text-amber-400" />
+                            Xem Email
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                {outboxEmails.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="text-center py-10 text-slate-400">
+                      Chưa có email nào được gửi trong hệ thống.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Modal: Admin Add Club (Direct input) */}
       {showAddClubModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
@@ -798,6 +1263,286 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
         </div>
       )}
+
+      {/* ========== RESCHEDULE BOOKING MODAL ========== */}
+      <AnimatePresence>
+        {rescheduleBooking && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-slate-200 relative"
+            >
+              <button
+                onClick={() => setRescheduleBooking(null)}
+                className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-400 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <h3 className="text-lg font-extrabold text-[#11385E] mb-1 flex items-center gap-2">
+                <CalendarClock className="w-5 h-5 text-blue-600" />
+                Đổi Giờ / Đổi Sân Booking
+              </h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Mã: <strong className="text-[#11385E] font-mono">{rescheduleBooking.bookingCode}</strong> • {rescheduleBooking.customerName}
+              </p>
+
+              <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 mb-4 text-xs space-y-1">
+                <div className="font-bold text-blue-900">Lịch hiện tại:</div>
+                <div className="text-blue-800">
+                  {rescheduleBooking.courtName} • {rescheduleBooking.date} • {rescheduleBooking.startTime} - {rescheduleBooking.endTime}
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Sân mới</label>
+                  <select
+                    value={rescheduleCourtId}
+                    onChange={e => setRescheduleCourtId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#11385E] focus:outline-none"
+                  >
+                    {courts.filter(c => c.status === 'ACTIVE').map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Ngày mới</label>
+                  <input
+                    type="date"
+                    value={rescheduleDate}
+                    onChange={e => setRescheduleDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#11385E] focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Giờ bắt đầu</label>
+                    <input
+                      type="time"
+                      value={rescheduleStart}
+                      onChange={e => setRescheduleStart(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#11385E] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Giờ kết thúc</label>
+                    <input
+                      type="time"
+                      value={rescheduleEnd}
+                      onChange={e => setRescheduleEnd(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#11385E] focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {rescheduleError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 font-semibold text-xs flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    {rescheduleError}
+                  </div>
+                )}
+
+                <div className="bg-amber-50 p-2.5 rounded-xl border border-amber-200 text-[11px] text-amber-800">
+                  <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
+                  Sau khi đổi giờ, trạng thái booking sẽ chuyển về <strong>"Chờ duyệt"</strong> để admin xác nhận lại.
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setRescheduleBooking(null)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRescheduleSubmit}
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <ArrowRightLeft className="w-4 h-4" />
+                  Xác Nhận Đổi Giờ
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ========== COURT BLOCK MODAL ========== */}
+      <AnimatePresence>
+        {showBlockModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-slate-200 relative max-h-[90vh] overflow-y-auto"
+            >
+              <button
+                onClick={() => { setShowBlockModal(false); setBlockStep('form'); setBlockConflicts([]); }}
+                className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-400 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <h3 className="text-lg font-extrabold text-rose-800 mb-4 flex items-center gap-2">
+                <Ban className="w-5 h-5 text-rose-600" />
+                Khóa Sân / Bảo Trì
+              </h3>
+
+              {blockStep === 'form' && (
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Chọn sân *</label>
+                    <select
+                      value={blockCourtId}
+                      onChange={e => setBlockCourtId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-400 focus:outline-none"
+                    >
+                      {courts.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Ngày khóa *</label>
+                    <input
+                      type="date"
+                      value={blockDate}
+                      onChange={e => setBlockDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-400 focus:outline-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Giờ bắt đầu *</label>
+                      <input
+                        type="time"
+                        value={blockStartTime}
+                        onChange={e => setBlockStartTime(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-400 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Giờ kết thúc *</label>
+                      <input
+                        type="time"
+                        value={blockEndTime}
+                        onChange={e => setBlockEndTime(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Lý do khóa sân *</label>
+                    <input
+                      type="text"
+                      value={blockReason}
+                      onChange={e => setBlockReason(e.target.value)}
+                      placeholder="VD: Bảo trì mặt sân, Sự kiện nội bộ BSB, ..."
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-400 focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setShowBlockModal(false); setBlockStep('form'); }}
+                      className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleBlockCheck}
+                      disabled={!blockCourtId || !blockReason.trim()}
+                      className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      <Lock className="w-4 h-4" />
+                      Khóa Sân
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {blockStep === 'confirm' && (
+                <div className="space-y-4 text-xs">
+                  <div className="p-4 bg-amber-50 border-2 border-amber-400 rounded-2xl space-y-3">
+                    <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+                      <AlertTriangle className="w-5 h-5 text-amber-600" />
+                      ⚠️ CẢNH BÁO: Phát hiện {blockConflicts.length} lịch đặt sân trùng!
+                    </div>
+                    <p className="text-amber-800">
+                      Các lịch đặt sân sau đây sẽ bị <strong>chuyển về trạng thái "Chờ duyệt" (PENDING)</strong> nếu bạn tiếp tục khóa sân:
+                    </p>
+                    <div className="space-y-2">
+                      {blockConflicts.map(b => (
+                        <div key={b.id} className="flex items-center justify-between bg-white/80 p-2.5 rounded-xl border border-amber-300">
+                          <div>
+                            <span className="font-mono font-bold text-[#11385E]">{b.bookingCode}</span>
+                            <span className="ml-2 text-slate-600">{b.customerName}</span>
+                          </div>
+                          <div className="text-right text-[11px]">
+                            <div className="font-semibold text-slate-800">{b.startTime} - {b.endTime}</div>
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              b.bookingStatus === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {b.bookingStatus}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => { setBlockStep('form'); setBlockConflicts([]); }}
+                      className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer"
+                    >
+                      ← Quay lại
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleBlockConfirm}
+                      className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <Ban className="w-4 h-4" />
+                      Xác Nhận Khóa Sân
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Transactional Email Preview Modal */}
+      <EmailPreviewModal
+        isOpen={isPreviewEmailOpen}
+        onClose={() => setIsPreviewEmailOpen(false)}
+        email={previewEmail}
+        onResendSuccess={() => setOutboxEmails(EmailService.getEmailOutbox())}
+      />
     </section>
   );
 };

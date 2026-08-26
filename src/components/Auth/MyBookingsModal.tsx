@@ -3,9 +3,11 @@ import { motion } from 'motion/react';
 import { 
   X, Calendar, Clock, QrCode, CheckCircle2, AlertCircle, 
   MapPin, Shield, Phone, CreditCard, ChevronRight, RefreshCw,
-  Award, Ticket, Flame, Trash2, ArrowUpRight
+  Award, Ticket, Flame, Trash2, ArrowUpRight, Mail, Send
 } from 'lucide-react';
-import { Booking, User } from '../../types';
+import { Booking, User, EmailNotification } from '../../types';
+import { EmailService } from '../../lib/emailService';
+import { EmailPreviewModal } from '../Email/EmailPreviewModal';
 import { BSBLogo } from '../BSBLogo';
 
 interface MyBookingsModalProps {
@@ -27,6 +29,8 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
 }) => {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<'upcoming' | 'history'>('upcoming');
+  const [previewEmail, setPreviewEmail] = useState<EmailNotification | null>(null);
+  const [isPreviewEmailOpen, setIsPreviewEmailOpen] = useState(false);
 
   if (!isOpen) return null;
 
@@ -187,13 +191,28 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
                   <button
                     onClick={() => setSelectedBooking(b)}
                     className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-indigo-200 cursor-pointer"
                   >
                     <QrCode className="w-4 h-4 text-indigo-600" />
                     Xem Vé & QR
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      let em = EmailService.getEmailByBookingId(b.id);
+                      if (!em) {
+                        em = await EmailService.sendBookingConfirmationEmail(b, b.bookingStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PENDING');
+                      }
+                      setPreviewEmail(em);
+                      setIsPreviewEmailOpen(true);
+                    }}
+                    className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-emerald-200 cursor-pointer"
+                  >
+                    <Mail className="w-4 h-4 text-emerald-600" />
+                    Email Xác Nhận
                   </button>
 
                   {b.bookingStatus !== 'CANCELLED' && onCancelBooking && (
@@ -203,7 +222,7 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
                           onCancelBooking(b.id);
                         }
                       }}
-                      className="p-2 text-slate-400 hover:text-red-600 rounded-xl hover:bg-red-50 transition-colors"
+                      className="p-2 text-slate-400 hover:text-red-600 rounded-xl hover:bg-red-50 transition-colors cursor-pointer"
                       title="Hủy đặt sân"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -221,7 +240,7 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
             <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center relative border border-slate-200">
               <button
                 onClick={() => setSelectedBooking(null)}
-                className="absolute top-3 right-3 p-1.5 rounded-full hover:bg-slate-100 text-slate-400"
+                className="absolute top-3 right-3 p-1.5 rounded-full hover:bg-slate-100 text-slate-400 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -259,6 +278,10 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
                   <span className="font-bold text-slate-900">{selectedBooking.customerName}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-slate-500">Email:</span>
+                  <span className="font-semibold text-slate-700">{selectedBooking.customerEmail || 'Chưa có'}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-slate-500">Trạng thái:</span>
                   <span className="font-bold text-emerald-600">{selectedBooking.bookingStatus}</span>
                 </div>
@@ -273,6 +296,13 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
             </div>
           </div>
         )}
+
+        {/* Email Preview Modal */}
+        <EmailPreviewModal
+          isOpen={isPreviewEmailOpen}
+          onClose={() => setIsPreviewEmailOpen(false)}
+          email={previewEmail}
+        />
       </motion.div>
     </div>
   );
