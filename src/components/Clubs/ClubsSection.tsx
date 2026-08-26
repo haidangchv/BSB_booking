@@ -5,24 +5,38 @@ import {
   PlusCircle, Sparkles, Phone, MessageCircle, ChevronRight,
   Info, Lock, UserPlus, HeartHandshake, Check, X
 } from 'lucide-react';
-import { Club } from '../../types';
+import { Club, User } from '../../types';
 
 interface ClubsSectionProps {
   clubs: Club[];
   onOpenAdminClubModal: () => void;
   isAdmin: boolean;
+  currentUser?: User | null;
 }
 
 export const ClubsSection: React.FC<ClubsSectionProps> = ({
   clubs,
   onOpenAdminClubModal,
-  isAdmin
+  isAdmin,
+  currentUser
 }) => {
   const [selectedClubForJoin, setSelectedClubForJoin] = useState<Club | null>(null);
-  const [memberName, setMemberName] = useState('');
-  const [memberPhone, setMemberPhone] = useState('');
-  const [duprSelf, setDuprSelf] = useState('DUPR 3.0');
+  const [memberName, setMemberName] = useState(currentUser?.name || '');
+  const [memberPhone, setMemberPhone] = useState(currentUser?.phone || '');
+  const [duprSelf, setDuprSelf] = useState(currentUser?.duprRating ? `DUPR ${currentUser.duprRating}` : 'DUPR 3.0');
   const [joinSuccess, setJoinSuccess] = useState(false);
+
+  // Sync with currentUser when opening join modal
+  const handleOpenJoin = (club: Club) => {
+    setSelectedClubForJoin(club);
+    if (currentUser) {
+      setMemberName(currentUser.name || '');
+      setMemberPhone(currentUser.phone || '');
+      if (currentUser.duprRating) {
+        setDuprSelf(`DUPR ${currentUser.duprRating}`);
+      }
+    }
+  };
 
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,7 +175,7 @@ export const ClubsSection: React.FC<ClubsSectionProps> = ({
                 </div>
 
                 <button
-                  onClick={() => setSelectedClubForJoin(club)}
+                  onClick={() => handleOpenJoin(club)}
                   className="px-4 py-2 bg-[#11385E] hover:bg-blue-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs shrink-0 cursor-pointer"
                 >
                   <UserPlus className="w-3.5 h-3.5 text-amber-300" />

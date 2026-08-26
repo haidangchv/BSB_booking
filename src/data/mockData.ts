@@ -1,4 +1,4 @@
-import { Court, Club, Minitour, Booking, PricingRule, CourtBlock, AuditLog, BookingType } from '../types';
+import { Court, Club, Minitour, Booking, PricingRule, CourtBlock, AuditLog, BookingType, User } from '../types';
 
 export const BSB_INFO = {
   name: 'BSB PICKLEBALL CLUB',
@@ -758,4 +758,58 @@ export const EVENT_SERVICES = [
   { id: 'catering', name: 'Gói Nước điện giải Isotonic & Teabreak bánh trái cây', price: 80000, isPerPerson: true, desc: 'Phục vụ không giới hạn trong suốt thời gian diễn ra sự kiện' },
   { id: 'livestream', name: 'Livestream Full HD 2 góc máy + Bình luận viên', price: 3000000, desc: 'Phát trực tiếp lên Fanpage & kênh YouTube với bảng điểm đồ hoạ' },
   { id: 'banner', name: 'Thiết kế & In ấn Backdrop/Standee thương hiệu BSB', price: 1200000, desc: 'Backdrop sân khấu 4x2.5m và 2 standee chào mừng' }
+];
+
+export const DEFAULT_ADMIN_USER: User = {
+  id: 'user-admin-bsb',
+  name: 'Ban Quản Trị BSB',
+  phone: '0908 123 272',
+  email: 'admin@bsbpickleball.vn',
+  role: 'admin',
+  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+  membershipTier: 'VIP',
+  duprRating: 4.5,
+  joinedAt: '2024-01-01'
+};
+
+export const DEFAULT_CUSTOMER_USER: User = {
+  id: 'user-cust-haidang',
+  name: 'Nguyễn Hải Đăng',
+  phone: '0908 123 456',
+  email: 'haidanghsgl@gmail.com',
+  role: 'customer',
+  avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+  duprRating: 3.5,
+  clubName: 'CLB BSB Sunrise Picklers',
+  membershipTier: 'GOLD',
+  joinedAt: '2025-03-15'
+};
+
+export const MOCK_USERS: User[] = [
+  DEFAULT_ADMIN_USER,
+  DEFAULT_CUSTOMER_USER,
+  {
+    id: 'user-cust-tuan',
+    name: 'Trần Minh Tuấn',
+    phone: '0912 345 678',
+    email: 'minhtuan.pickle@gmail.com',
+    role: 'customer',
+    avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=200&q=80',
+    duprRating: 3.0,
+    clubName: 'CLB BSB Doanh Nhân & Bạn Hữu',
+    membershipTier: 'SILVER',
+    joinedAt: '2025-06-10'
+  },
+  {
+    id: 'user-cust-lan',
+    name: 'Phạm Thị Ngọc Lan',
+    phone: '0933 888 999',
+    email: 'ngoclan.bsb@gmail.com',
+    role: 'customer',
+    avatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=200&q=80',
+    duprRating: 3.2,
+    clubName: 'CLB Nữ Hoàng Pickleball BSB',
+    membershipTier: 'GOLD',
+    joinedAt: '2025-04-20'
+  }
 ];

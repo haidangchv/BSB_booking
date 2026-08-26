@@ -6,7 +6,7 @@ import {
   Activity, Layers, AlertCircle, FileText, Database, 
   RefreshCw, Lock, Sparkles, AlertTriangle, ArrowUpRight
 } from 'lucide-react';
-import { Club, Booking, Minitour, Court, BookingType, BookingStatus } from '../../types';
+import { Club, Booking, Minitour, Court, BookingType, BookingStatus, User } from '../../types';
 import { DatabaseService, isSupabaseConfigured } from '../../lib/supabase';
 
 interface AdminPanelProps {
@@ -14,10 +14,13 @@ interface AdminPanelProps {
   bookings: Booking[];
   minitours: Minitour[];
   courts: Court[];
+  currentUser?: User | null;
   onAddClub: (club: Club) => void;
   onUpdateBookingStatus: (id: string, status: BookingStatus) => void;
   onAddMinitour: (tour: Minitour) => void;
   onUpdateMatchScore: (tourId: string, matchId: string, s1: number, s2: number, winnerId?: string) => void;
+  onSwitchToAdmin?: () => void;
+  onNavigateToBooking?: () => void;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -25,12 +28,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   bookings,
   minitours,
   courts,
+  currentUser,
   onAddClub,
   onUpdateBookingStatus,
   onAddMinitour,
-  onUpdateMatchScore
+  onUpdateMatchScore,
+  onSwitchToAdmin,
+  onNavigateToBooking
 }) => {
   const [activeAdminTab, setActiveAdminTab] = useState<'clubs' | 'bookings' | 'minitours' | 'database' | 'stats'>('clubs');
+
+  // Role Guard Check: If not logged in or role is not admin
+  const isUserAdmin = currentUser?.role === 'admin';
 
   // New Club Form State (As requested: Admin adds club details directly)
   const [newClubName, setNewClubName] = useState('');
@@ -135,6 +144,84 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     return matchesType && matchesStatus;
   });
 
+  if (!isUserAdmin) {
+    return (
+      <section className="py-12 px-4 max-w-4xl mx-auto font-sans">
+        <div className="bg-white rounded-3xl p-8 md:p-10 border border-slate-200 shadow-xl text-center space-y-6">
+          <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto shadow-xs">
+            <Lock className="w-8 h-8" />
+          </div>
+
+          <div className="max-w-md mx-auto space-y-2">
+            <span className="px-3 py-1 bg-amber-100 text-amber-900 rounded-full text-xs font-bold uppercase tracking-wider">
+              Yêu Cầu Quyền Quản Trị Viên (Admin)
+            </span>
+            <h2 className="text-2xl font-extrabold text-[#11385E]">
+              Khu Vực Quản Trị Hệ Thống BSB
+            </h2>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Bạn hiện đang truy cập với vai trò{' '}
+              <strong className="text-indigo-700 font-bold">
+                {currentUser ? `Khách Hàng (${currentUser.name})` : 'Khách Vãng Lai (Chưa đăng nhập)'}
+              </strong>
+              . Khu vực này chỉ dành cho Ban Quản Trị cụm sân BSB để duyệt lịch đặt sân, cấu hình CLB và quản lý giải đấu.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg mx-auto text-left text-xs bg-slate-50 p-4 rounded-2xl border border-slate-200">
+            <div className="space-y-1.5">
+              <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-indigo-600" />
+                Khách Hàng (Customer)
+              </span>
+              <p className="text-[11px] text-slate-500">
+                • Đặt 5 loại hình sân linh hoạt<br/>
+                • Xem & tham gia các CLB<br/>
+                • Đăng ký thi đấu Minitour<br/>
+                • Quản lý vé & lịch cá nhân
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="font-bold text-emerald-800 flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                Quản Trị Viên (Admin)
+              </span>
+              <p className="text-[11px] text-slate-500">
+                • Thêm & cấu hình thông tin CLB<br/>
+                • Phê duyệt / Hủy lịch đặt sân<br/>
+                • Cập nhật tỷ số trận đấu Minitour<br/>
+                • Quản lý Database & Báo cáo
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            {onSwitchToAdmin && (
+              <button
+                onClick={onSwitchToAdmin}
+                className="w-full sm:w-auto px-6 py-3 bg-[#11385E] hover:bg-[#0c2946] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                Đăng Nhập / Chuyển Sang Quyền Admin (1-Chạm)
+              </button>
+            )}
+
+            {onNavigateToBooking && (
+              <button
+                onClick={onNavigateToBooking}
+                className="w-full sm:w-auto px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                <Calendar className="w-4 h-4 text-slate-600" />
+                Quay Lại Đặt Sân
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="py-10 px-4 max-w-7xl mx-auto font-sans">
       {/* Header */}
@@ -148,7 +235,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               TRUNG TÂM QUẢN TRỊ BSB PICKLEBALL
             </h2>
             <p className="text-xs text-blue-200">
-              Quản lý danh sách Câu Lạc Bộ, phê duyệt lịch đặt sân (CLB/Minitour/Cố định/Vãng lai/Sự kiện) & kết nối Supabase
+              Quản trị viên: <strong>{currentUser?.name || 'Ban Quản Trị BSB'}</strong> ({currentUser?.email || 'admin@bsbpickleball.vn'}) • Toàn quyền quản trị
             </p>
           </div>
         </div>

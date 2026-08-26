@@ -207,3 +207,19 @@ export interface Minitour {
   rules: string[];
 }
 
+export type UserRole = 'customer' | 'admin';
+
+export interface User {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  role: UserRole;
+  avatar?: string;
+  duprRating?: number;
+  clubName?: string;
+  membershipTier?: 'STANDARD' | 'SILVER' | 'GOLD' | 'VIP';
+  password?: string;
+  joinedAt?: string;
+}
+

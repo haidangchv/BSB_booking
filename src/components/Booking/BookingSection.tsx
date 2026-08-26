@@ -3,11 +3,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Calendar, Clock, CheckCircle2, Shield, Sparkles, MapPin, 
   Users, Award, ChevronRight, Info, AlertCircle, QrCode, 
-  CreditCard, Phone, User, Check, RefreshCw, Layers, ArrowRight,
+  CreditCard, Phone, User as UserIcon, Check, RefreshCw, Layers, ArrowRight,
   Flame, Trophy, Search, AlertTriangle, Timer, X, Copy, ExternalLink
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Court, Booking, BookingType, Club, BookingStatus } from '../../types';
+import { Court, Booking, BookingType, Club, BookingStatus, User } from '../../types';
 import { BSB_INFO, BSB_COLORS, EVENT_SERVICES } from '../../data/mockData';
 import { checkSlotConflict } from '../../lib/supabase';
 import { BSBLogo } from '../BSBLogo';
@@ -16,6 +16,7 @@ interface BookingSectionProps {
   courts: Court[];
   clubs: Club[];
   bookings: Booking[];
+  currentUser?: User | null;
   onAddBooking: (booking: Booking) => void;
   onNavigateToClubs?: () => void;
 }
@@ -24,6 +25,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
   courts,
   clubs,
   bookings,
+  currentUser,
   onAddBooking,
   onNavigateToClubs
 }) => {
@@ -94,10 +96,19 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
   const [eventType, setEventType] = useState<string>('corporate');
 
   // --- Common Customer Info & Checkout Modal ---
-  const [customerName, setCustomerName] = useState<string>('');
-  const [customerPhone, setCustomerPhone] = useState<string>('');
-  const [customerEmail, setCustomerEmail] = useState<string>('');
+  const [customerName, setCustomerName] = useState<string>(currentUser?.name || '');
+  const [customerPhone, setCustomerPhone] = useState<string>(currentUser?.phone || '');
+  const [customerEmail, setCustomerEmail] = useState<string>(currentUser?.email || '');
   const [customerNotes, setCustomerNotes] = useState<string>('');
+
+  // Auto populate customer details if currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      setCustomerName(currentUser.name || '');
+      setCustomerPhone(currentUser.phone || '');
+      setCustomerEmail(currentUser.email || '');
+    }
+  }, [currentUser]);
   const [agreePolicy, setAgreePolicy] = useState<boolean>(true);
   const [conflictError, setConflictError] = useState<string | null>(null);
 

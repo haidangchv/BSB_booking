@@ -6,11 +6,14 @@ import { MinitourSection } from './components/Minitour/MinitourSection';
 import { AdminPanel } from './components/Admin/AdminPanel';
 import { PromptPlanModal } from './components/PromptPlanModal';
 import { TicketLookupModal } from './components/TicketLookupModal';
+import { AuthModal } from './components/Auth/AuthModal';
+import { MyBookingsModal } from './components/Auth/MyBookingsModal';
 import { Footer } from './components/Footer';
 import { 
-  INITIAL_COURTS, INITIAL_CLUBS, INITIAL_MINITOURS, INITIAL_BOOKINGS, BSB_INFO 
+  INITIAL_COURTS, INITIAL_CLUBS, INITIAL_MINITOURS, INITIAL_BOOKINGS, 
+  DEFAULT_ADMIN_USER, DEFAULT_CUSTOMER_USER 
 } from './data/mockData';
-import { Court, Club, Minitour, Booking, TournamentTeam } from './types';
+import { Court, Club, Minitour, Booking, TournamentTeam, User } from './types';
 import { DatabaseService, isSupabaseConfigured } from './lib/supabase';
 import { 
   Calendar, Users, Trophy, Sparkles, ShieldCheck, 
@@ -19,8 +22,25 @@ import {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'booking' | 'clubs' | 'minitour' | 'admin'>('booking');
-  const [isAdmin, setIsAdmin] = useState(true); // default true for easy demo & admin testing
   const [isLoading, setIsLoading] = useState(true);
+
+  // Authentication State: Khách Hàng (Customer) vs Quản Trị Viên (Admin)
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem('bsb_current_user');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {
+      // fallback
+    }
+    // Default to a realistic active Customer user for instant exploration
+    return DEFAULT_CUSTOMER_USER;
+  });
+
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalInitialTab, setAuthModalInitialTab] = useState<'login' | 'register' | 'switch'>('login');
+  const [isMyBookingsOpen, setIsMyBookingsOpen] = useState(false);
 
   // Core Data States
   const [courts, setCourts] = useState<Court[]>(INITIAL_COURTS);
@@ -55,6 +75,38 @@ export default function App() {
     loadData();
   }, []);
 
+  // Auth Handlers
+  const handleLogin = (user: User) => {
+    setCurrentUser(user);
+    try {
+      localStorage.setItem('bsb_current_user', JSON.stringify(user));
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    try {
+      localStorage.removeItem('bsb_current_user');
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleQuickSwitchRole = () => {
+    if (currentUser?.role === 'admin') {
+      handleLogin(DEFAULT_CUSTOMER_USER);
+    } else {
+      handleLogin(DEFAULT_ADMIN_USER);
+    }
+  };
+
+  const openAuthModalWithTab = (tab: 'login' | 'register' | 'switch' = 'login') => {
+    setAuthModalInitialTab(tab);
+    setIsAuthModalOpen(true);
+  };
+
   // Handlers with Database Service Persistence
   const handleAddBooking = async (newBooking: Booking) => {
     setBookings(prev => [newBooking, ...prev]);
@@ -69,6 +121,10 @@ export default function App() {
   const handleUpdateBookingStatus = async (id: string, status: Booking['bookingStatus']) => {
     const updated = await DatabaseService.updateBookingStatus(id, status);
     setBookings(updated);
+  };
+
+  const handleCancelBooking = async (bookingId: string) => {
+    await handleUpdateBookingStatus(bookingId, 'CANCELLED');
   };
 
   const handleAddMinitour = async (newTour: Minitour) => {
@@ -113,41 +169,73 @@ export default function App() {
     setMinitours(updated);
   };
 
+  const isAdmin = currentUser?.role === 'admin';
+
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 flex flex-col font-sans selection:bg-[#11385E] selection:text-white">
       {/* Top Navigation */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        isAdmin={isAdmin}
-        setIsAdmin={setIsAdmin}
+        currentUser={currentUser}
+        onOpenAuthModal={openAuthModalWithTab}
+        onOpenMyBookings={() => setIsMyBookingsOpen(true)}
         onOpenPlanModal={() => setIsPlanModalOpen(true)}
         onOpenTicketLookup={() => setIsTicketModalOpen(true)}
+        onLogout={handleLogout}
+        onQuickSwitchRole={handleQuickSwitchRole}
       />
 
-      {/* Database Connection Status Bar */}
-      <div className="bg-slate-900 text-slate-300 py-1.5 px-4 text-xs flex items-center justify-between border-b border-slate-800">
-        <div className="max-w-7xl mx-auto w-full flex items-center justify-between">
-          <div className="flex items-center gap-2">
+      {/* Role & Database Status Indicator Bar */}
+      <div className="bg-slate-900 text-slate-300 py-1.5 px-4 text-xs border-b border-slate-800">
+        <div className="max-w-7xl mx-auto w-full flex flex-col sm:flex-row items-center justify-between gap-2">
+          {/* Left: Role and User Badge */}
+          <div className="flex items-center gap-2.5">
             <span className="flex h-2 w-2 relative">
-              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isSupabaseConfigured ? 'bg-emerald-400' : 'bg-blue-400'}`}></span>
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${isSupabaseConfigured ? 'bg-emerald-500' : 'bg-blue-500'}`}></span>
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isAdmin ? 'bg-emerald-400' : 'bg-blue-400'}`}></span>
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${isAdmin ? 'bg-emerald-500' : 'bg-blue-500'}`}></span>
             </span>
-            <span>
-              {isSupabaseConfigured ? (
-                <strong className="text-emerald-400">Supabase PostgreSQL Connected</strong>
-              ) : (
-                <strong className="text-blue-300">Local Persistent DB Engine (Ready for Supabase / Vercel deployment)</strong>
-              )}
-            </span>
+
+            {currentUser ? (
+              <span className="flex items-center gap-1.5 text-[11px]">
+                Đang xem với vai trò:
+                <strong className={isAdmin ? 'text-emerald-400' : 'text-amber-300'}>
+                  {isAdmin ? '🛡️ Quản Trị Viên (Admin)' : `🎾 Khách Hàng (${currentUser.name})`}
+                </strong>
+                <button
+                  onClick={handleQuickSwitchRole}
+                  className="ml-1 text-[10px] text-blue-300 hover:text-white underline cursor-pointer"
+                  title="Chuyển đổi vai trò nhanh để kiểm thử"
+                >
+                  [Đổi sang {isAdmin ? 'Khách' : 'Admin'}]
+                </button>
+              </span>
+            ) : (
+              <span className="text-[11px] text-slate-400">
+                Chế độ: <strong className="text-white">Khách Vãng Lai</strong> (
+                <button
+                  onClick={() => openAuthModalWithTab('login')}
+                  className="text-amber-300 hover:underline"
+                >
+                  Đăng nhập
+                </button>
+                )
+              </span>
+            )}
           </div>
 
-          <div className="hidden sm:flex items-center gap-4 text-[11px] text-slate-400">
+          {/* Right: DB & System Stats */}
+          <div className="flex items-center gap-3 text-[11px] text-slate-400">
+            <span className="flex items-center gap-1">
+              <Server className="w-3 h-3 text-slate-400" />
+              {isSupabaseConfigured ? 'Supabase Postgres Active' : 'Local Persistent Engine'}
+            </span>
+            <span>•</span>
             <span>6 Sân USAPA</span>
             <span>•</span>
-            <span>{clubs.filter(c => c.status === 'ACTIVE').length} CLB Hoạt Động</span>
+            <span>{clubs.filter(c => c.status === 'ACTIVE').length} CLB</span>
             <span>•</span>
-            <span>{bookings.length} Lịch Đặt Sân</span>
+            <span>{bookings.length} Lịch Đặt</span>
           </div>
         </div>
       </div>
@@ -183,13 +271,23 @@ export default function App() {
                 Đặt Sân Ngay Bây Giờ
               </button>
 
-              <button
-                onClick={() => setIsPlanModalOpen(true)}
-                className="px-5 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold text-xs border border-white/30 flex items-center gap-2 transition-colors cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4 text-amber-300" />
-                Xem Kế Hoạch & Master Prompt AI
-              </button>
+              {currentUser && currentUser.role === 'customer' ? (
+                <button
+                  onClick={() => setIsMyBookingsOpen(true)}
+                  className="px-5 py-3 bg-white/15 hover:bg-white/25 text-white rounded-xl font-bold text-xs border border-white/30 flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Users className="w-4 h-4 text-amber-300" />
+                  Xem Lịch Đặt Của Tôi ({bookings.filter(b => b.customerPhone === currentUser.phone).length})
+                </button>
+              ) : (
+                <button
+                  onClick={() => openAuthModalWithTab('login')}
+                  className="px-5 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold text-xs border border-white/30 flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Users className="w-4 h-4 text-amber-300" />
+                  Đăng Nhập / Đăng Ký Hội Viên
+                </button>
+              )}
             </div>
           </div>
 
@@ -244,6 +342,7 @@ export default function App() {
             courts={courts}
             clubs={clubs}
             bookings={bookings}
+            currentUser={currentUser}
             onAddBooking={handleAddBooking}
             onNavigateToClubs={() => setActiveTab('clubs')}
           />
@@ -252,6 +351,7 @@ export default function App() {
         {activeTab === 'clubs' && (
           <ClubsSection
             clubs={clubs}
+            currentUser={currentUser}
             onOpenAdminClubModal={() => {
               setActiveTab('admin');
             }}
@@ -262,6 +362,7 @@ export default function App() {
         {activeTab === 'minitour' && (
           <MinitourSection
             minitours={minitours}
+            currentUser={currentUser}
             onRegisterTeam={handleRegisterTournamentTeam}
           />
         )}
@@ -272,10 +373,13 @@ export default function App() {
             bookings={bookings}
             minitours={minitours}
             courts={courts}
+            currentUser={currentUser}
             onAddClub={handleAddClub}
             onUpdateBookingStatus={handleUpdateBookingStatus}
             onAddMinitour={handleAddMinitour}
             onUpdateMatchScore={handleUpdateMatchScore}
+            onSwitchToAdmin={() => handleLogin(DEFAULT_ADMIN_USER)}
+            onNavigateToBooking={() => setActiveTab('booking')}
           />
         )}
       </main>
@@ -294,6 +398,26 @@ export default function App() {
         isOpen={isTicketModalOpen}
         onClose={() => setIsTicketModalOpen(false)}
         bookings={bookings}
+      />
+
+      {/* Auth Modal (Login / Register / Switch Role) */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        currentUser={currentUser}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+        initialTab={authModalInitialTab}
+      />
+
+      {/* My Bookings Modal (for Customer / Member) */}
+      <MyBookingsModal
+        isOpen={isMyBookingsOpen}
+        onClose={() => setIsMyBookingsOpen(false)}
+        currentUser={currentUser}
+        bookings={bookings}
+        onOpenBookingTab={() => setActiveTab('booking')}
+        onCancelBooking={handleCancelBooking}
       />
     </div>
   );

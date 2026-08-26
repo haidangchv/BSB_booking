@@ -5,25 +5,36 @@ import {
   Sparkles, CheckCircle2, Flame, ArrowRight, DollarSign,
   Medal, UserCheck, Play, Check, X
 } from 'lucide-react';
-import { Minitour, TournamentTeam } from '../../types';
+import { Minitour, TournamentTeam, User } from '../../types';
 
 interface MinitourSectionProps {
   minitours: Minitour[];
+  currentUser?: User | null;
   onRegisterTeam: (tourId: string, team: TournamentTeam) => void;
 }
 
 export const MinitourSection: React.FC<MinitourSectionProps> = ({
   minitours,
+  currentUser,
   onRegisterTeam
 }) => {
   const [selectedTourId, setSelectedTourId] = useState<string>(minitours[0]?.id || 'tour-1');
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [teamName, setTeamName] = useState('');
-  const [player1, setPlayer1] = useState('');
+  const [player1, setPlayer1] = useState(currentUser?.name || '');
   const [player2, setPlayer2] = useState('');
-  const [phone, setPhone] = useState('');
-  const [duprEstimate, setDuprEstimate] = useState('3.0');
+  const [phone, setPhone] = useState(currentUser?.phone || '');
+  const [duprEstimate, setDuprEstimate] = useState(currentUser?.duprRating ? `${currentUser.duprRating}` : '3.0');
   const [regSuccess, setRegSuccess] = useState(false);
+
+  const openRegisterModal = () => {
+    if (currentUser) {
+      if (!player1) setPlayer1(currentUser.name);
+      if (!phone) setPhone(currentUser.phone);
+      if (currentUser.duprRating) setDuprEstimate(String(currentUser.duprRating));
+    }
+    setIsRegisterModalOpen(true);
+  };
 
   const selectedTour = minitours.find(t => t.id === selectedTourId) || minitours[0];
 
@@ -157,7 +168,7 @@ export const MinitourSection: React.FC<MinitourSectionProps> = ({
           <div className="flex flex-wrap items-center gap-3">
             {selectedTour.status === 'registration_open' && (
               <button
-                onClick={() => setIsRegisterModalOpen(true)}
+                onClick={openRegisterModal}
                 className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-2xl font-extrabold text-xs uppercase tracking-wider flex items-center gap-2 transition-all shadow-md cursor-pointer"
               >
                 <UserCheck className="w-4 h-4" />
