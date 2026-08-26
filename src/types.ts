@@ -25,6 +25,7 @@ export interface Court {
   status: CourtStatus;
   isActive: boolean;
   displayOrder?: number;
+  category?: 'standard' | 'vip' | 'training';
 }
 
 export interface Club {

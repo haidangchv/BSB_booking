@@ -48,7 +48,7 @@ export const HomeHero: React.FC<HomeHeroProps> = ({
 
             {/* Description */}
             <p className="text-slate-300 text-sm sm:text-base leading-relaxed max-w-xl">
-              Hệ thống đặt sân Pickleball chuẩn thi đấu BSB. Trải nghiệm đặt lịch tức thì, chống trùng lịch tuyệt đối, tự động thông báo qua Email và kết nối cộng đồng năng động.
+              Hệ thống 9 cụm sân Pickleball BSB: gồm <strong>7 sân chuẩn quốc tế</strong> (Sân 6 & 7 VIP) và <strong>2 sân tập nhỏ</strong> (Sân 8 & 9). Trải nghiệm đặt lịch tức thì, chống trùng lịch tuyệt đối và tự động thông báo qua Email.
             </p>
 
             {/* CTA Buttons */}
@@ -138,7 +138,7 @@ export const HomeHero: React.FC<HomeHeroProps> = ({
               <div className="grid grid-cols-2 gap-3.5">
                 <div className="bg-[#091f37]/90 border border-[#18426d] rounded-2xl p-4 text-center">
                   <div className="text-3xl sm:text-4xl font-black text-amber-400">
-                    {courtsCount} Sân
+                    7 Sân
                   </div>
                   <div className="text-xs text-slate-300 font-medium mt-1">
                     Sân chuẩn quốc tế
@@ -147,7 +147,7 @@ export const HomeHero: React.FC<HomeHeroProps> = ({
 
                 <div className="bg-[#091f37]/90 border border-[#18426d] rounded-2xl p-4 text-center">
                   <div className="text-3xl sm:text-4xl font-black text-emerald-400">
-                    {availableSlotsCount}+
+                    22+
                   </div>
                   <div className="text-xs text-slate-300 font-medium mt-1">
                     Khung giờ còn trống
@@ -161,6 +161,13 @@ export const HomeHero: React.FC<HomeHeroProps> = ({
                   <div className="w-4 h-4 rounded-full bg-amber-400/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
                     <Check className="w-3 h-3 stroke-[3]" />
                   </div>
+                  <span><strong>7 Sân chuẩn quốc tế</strong> (Sân 6, 7 VIP) + <strong>2 Sân tập nhỏ</strong> (Sân 8, 9)</span>
+                </div>
+
+                <div className="flex items-start gap-2.5">
+                  <div className="w-4 h-4 rounded-full bg-amber-400/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+                    <Check className="w-3 h-3 stroke-[3]" />
+                  </div>
                   <span>Mặt sân US Open Pro Cushion 8 lớp giảm chấn thương</span>
                 </div>
 
@@ -168,14 +175,7 @@ export const HomeHero: React.FC<HomeHeroProps> = ({
                   <div className="w-4 h-4 rounded-full bg-amber-400/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
                     <Check className="w-3 h-3 stroke-[3]" />
                   </div>
-                  <span>Hệ thống chiếu sáng LED chống chói 500 Lux</span>
-                </div>
-
-                <div className="flex items-start gap-2.5">
-                  <div className="w-4 h-4 rounded-full bg-amber-400/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-                    <Check className="w-3 h-3 stroke-[3]" />
-                  </div>
-                  <span>Email xác nhận tự động & gửi lại ngay trong tài khoản</span>
+                  <span>Hệ thống chiếu sáng LED chống chói 500 - 1000 Lux</span>
                 </div>
               </div>
 

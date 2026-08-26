@@ -15,7 +15,7 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
 
 // LocalStorage Persistence Keys (Offline / Demo Fallback Mode)
 const STORAGE_KEYS = {
-  COURTS: 'bsb_courts_v2',
+  COURTS: 'bsb_courts_v3',
   CLUBS: 'bsb_clubs_v2',
   BOOKINGS: 'bsb_bookings_v2',
   MINITOURS: 'bsb_minitours_v2',

@@ -618,7 +618,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
           ĐẶT SÂN PICKLEBALL BSB
         </h2>
         <p className="text-slate-500 text-xs md:text-sm mt-2 max-w-xl mx-auto">
-          6 sân tiêu chuẩn quốc tế USAPA, mặt đệm Laykold 8 lớp êm ái, hệ thống đèn chống chói 800-1000 Lux và phòng thay đồ tiện nghi.
+          Hệ thống 9 cụm sân: <strong>7 sân chuẩn quốc tế (Sân 6 & 7 VIP)</strong> + <strong>2 sân tập nhỏ (Sân 8 & 9)</strong>, mặt đệm Laykold 8 lớp êm ái, hệ thống đèn chống chói 800-1000 Lux.
         </p>
       </div>
 
@@ -825,22 +825,43 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
               </div>
 
               {/* Court Selection */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 mb-4">
-                {courts.map((court) => (
-                  <button
-                    key={court.id}
-                    type="button"
-                    onClick={() => { setSelectedCourtId(court.id); setSelectedSlots([]); }}
-                    className={`p-2.5 rounded-xl text-center border text-xs transition-all cursor-pointer ${
-                      selectedCourtId === court.id
-                        ? 'bg-blue-50 border-[#11385E] font-bold text-[#11385E]'
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="font-bold truncate">{court.name.split(' ')[0]} {court.name.split(' ')[1]}</div>
-                    <div className="text-[10px] text-slate-500 truncate">{court.surface.slice(0, 15)}...</div>
-                  </button>
-                ))}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2 mb-4">
+                {courts.map((court) => {
+                  const isVip = court.id === 'court-6' || court.id === 'court-7' || court.category === 'vip';
+                  const isTraining = court.id === 'court-8' || court.id === 'court-9' || court.category === 'training';
+
+                  return (
+                    <button
+                      key={court.id}
+                      type="button"
+                      onClick={() => { setSelectedCourtId(court.id); setSelectedSlots([]); }}
+                      className={`p-2.5 rounded-xl text-center border text-xs transition-all cursor-pointer relative ${
+                        selectedCourtId === court.id
+                          ? 'bg-blue-50 border-[#11385E] font-bold text-[#11385E] ring-2 ring-[#11385E]/20'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center gap-1 font-bold truncate">
+                        <span>{court.name.split(' ')[0]} {court.name.split(' ')[1]}</span>
+                      </div>
+                      <div className="mt-1">
+                        {isVip ? (
+                          <span className="px-1.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 font-extrabold rounded text-[9px]">
+                            ⭐ VIP
+                          </span>
+                        ) : isTraining ? (
+                          <span className="px-1.5 py-0.5 bg-sky-100 text-sky-900 border border-sky-300 font-extrabold rounded text-[9px]">
+                            🎯 Sân tập
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[9px]">
+                            🏆 USAPA
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Time Slots Matrix */}
@@ -1237,21 +1258,41 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
               {/* Court Selection */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">Chọn sân cố định:</label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-                  {courts.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => setFixedCourtId(c.id)}
-                      className={`p-2 rounded-xl text-center border text-xs transition-all cursor-pointer ${
-                        fixedCourtId === c.id
-                          ? 'bg-[#676F84] text-white border-[#676F84] font-bold'
-                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="truncate">{c.name.split(' ')[0]} {c.name.split(' ')[1]}</div>
-                    </button>
-                  ))}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2">
+                  {courts.map((c) => {
+                    const isVip = c.id === 'court-6' || c.id === 'court-7' || c.category === 'vip';
+                    const isTraining = c.id === 'court-8' || c.id === 'court-9' || c.category === 'training';
+
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setFixedCourtId(c.id)}
+                        className={`p-2.5 rounded-xl text-center border text-xs transition-all cursor-pointer ${
+                          fixedCourtId === c.id
+                            ? 'bg-[#676F84] text-white border-[#676F84] font-bold ring-2 ring-[#676F84]/20'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="truncate font-bold">{c.name.split(' ')[0]} {c.name.split(' ')[1]}</div>
+                        <div className="mt-1">
+                          {isVip ? (
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold ${fixedCourtId === c.id ? 'bg-amber-400 text-slate-950' : 'bg-amber-100 text-amber-900 border border-amber-300'}`}>
+                              ⭐ VIP
+                            </span>
+                          ) : isTraining ? (
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold ${fixedCourtId === c.id ? 'bg-sky-400 text-slate-950' : 'bg-sky-100 text-sky-900 border border-sky-300'}`}>
+                              🎯 Sân tập
+                            </span>
+                          ) : (
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] ${fixedCourtId === c.id ? 'bg-slate-600 text-slate-200' : 'bg-slate-100 text-slate-600'}`}>
+                              🏆 USAPA
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1377,30 +1418,59 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
 
             {/* Step 2: Court */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2 mb-3">
-                <MapPin className="w-4 h-4 text-[#11385E]" />
-                Bước 2: Chọn Sân Chơi (6 Sân USAPA)
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-[#11385E]" />
+                  Bước 2: Chọn Sân Chơi (7 Sân Chuẩn Quốc Tế & 2 Sân Tập Nhỏ)
+                </span>
+                <span className="text-[11px] text-slate-500 font-semibold">
+                  Sân 6, 7 (VIP) • Sân 8, 9 (Sân tập)
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {courts.map((court) => {
                   const isSelected = selectedCourtId === court.id;
+                  const isVip = court.id === 'court-6' || court.id === 'court-7' || court.category === 'vip';
+                  const isTraining = court.id === 'court-8' || court.id === 'court-9' || court.category === 'training';
+
                   return (
                     <div
                       key={court.id}
                       onClick={() => { setSelectedCourtId(court.id); setSelectedSlots([]); }}
-                      className={`p-3 rounded-xl border transition-all cursor-pointer text-left ${
+                      className={`p-3 rounded-xl border transition-all cursor-pointer text-left relative ${
                         isSelected
-                          ? 'bg-blue-50/70 border-[#11385E] ring-2 ring-[#11385E]/20'
+                          ? 'bg-blue-50/70 border-[#11385E] ring-2 ring-[#11385E]/20 shadow-xs'
+                          : isVip
+                          ? 'bg-amber-50/30 border-amber-200 hover:border-amber-400'
+                          : isTraining
+                          ? 'bg-sky-50/30 border-sky-200 hover:border-sky-400'
                           : 'bg-white border-slate-200 hover:border-slate-300'
                       }`}
                     >
                       <div className="flex justify-between items-start">
-                        <h4 className="font-bold text-xs text-slate-900">{court.name}</h4>
-                        {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-[#11385E]" />}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="font-bold text-xs text-slate-900">{court.name}</h4>
+                          {isVip && (
+                            <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-black rounded text-[9px]">
+                              ⭐ VIP
+                            </span>
+                          )}
+                          {isTraining && (
+                            <span className="px-1.5 py-0.2 bg-sky-500 text-white font-extrabold rounded text-[9px]">
+                              🎯 SÂN TẬP
+                            </span>
+                          )}
+                        </div>
+                        {isSelected && <CheckCircle2 className="w-4 h-4 text-[#11385E] shrink-0" />}
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{court.surface}</p>
-                      <div className="text-[11px] font-semibold text-[#11385E] mt-1.5">
-                        {court.hourlyRateNormal.toLocaleString('vi-VN')}đ - {court.hourlyRatePeak.toLocaleString('vi-VN')}đ/h
+                      <p className="text-[11px] text-slate-500 mt-1 line-clamp-1">{court.surface}</p>
+                      <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-100">
+                        <span className="text-[11px] font-extrabold text-[#11385E]">
+                          {court.hourlyRateNormal.toLocaleString('vi-VN')}đ - {court.hourlyRatePeak.toLocaleString('vi-VN')}đ/h
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium capitalize">
+                          {court.type === 'center_court' ? 'Sân VIP' : court.type === 'indoor' ? 'Trong nhà' : 'Ngoài trời'}
+                        </span>
                       </div>
                     </div>
                   );
