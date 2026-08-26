@@ -66,8 +66,8 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
     badge: string;
   }> = [
     {
-      name: 'Nguyễn Hải Đăng',
-      email: 'haidanghsgl@gmail.com',
+      name: 'Phan Phú Hòa',
+      email: 'phanphuhoa.pickle@gmail.com',
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
       role: 'customer',
       dupr: 3.5,

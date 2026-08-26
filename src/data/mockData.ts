@@ -824,10 +824,10 @@ export const DEFAULT_ADMIN_USER: User = {
 };
 
 export const DEFAULT_CUSTOMER_USER: User = {
-  id: 'user-cust-haidang',
-  name: 'Nguyễn Hải Đăng',
+  id: 'user-cust-phanphuhoa',
+  name: 'Phan Phú Hòa',
   phone: '0908 123 456',
-  email: 'haidanghsgl@gmail.com',
+  email: 'phanphuhoa.pickle@gmail.com',
   role: 'customer',
   avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
   duprRating: 3.5,

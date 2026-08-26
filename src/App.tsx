@@ -25,7 +25,7 @@ export default function App() {
   // Authentication State: Khách Hàng (Customer) vs Quản Trị Viên (Admin)
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
-      const saved = localStorage.getItem('bsb_current_user');
+      const saved = localStorage.getItem('bsb_current_user_v3');
       if (saved) {
         return JSON.parse(saved);
       }
@@ -77,7 +77,7 @@ export default function App() {
   const handleLogin = (user: User) => {
     setCurrentUser(user);
     try {
-      localStorage.setItem('bsb_current_user', JSON.stringify(user));
+      localStorage.setItem('bsb_current_user_v3', JSON.stringify(user));
     } catch {
       // ignore
     }
@@ -86,7 +86,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     try {
-      localStorage.removeItem('bsb_current_user');
+      localStorage.removeItem('bsb_current_user_v3');
     } catch {
       // ignore
     }
