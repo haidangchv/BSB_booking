@@ -8,7 +8,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 2. Create Enums
 CREATE TYPE booking_type_enum AS ENUM ('clb', 'minitour', 'fixed', 'casual', 'event');
-CREATE TYPE booking_status_enum AS ENUM ('HOLD', 'PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'REJECTED', 'NO_SHOW');
+CREATE TYPE booking_status_enum AS ENUM ('HOLD', 'PENDING', 'CONFIRMED', 'CHECKIN_PENDING', 'CHECKED_IN', 'COMPLETED', 'NO_SHOW', 'CANCELLED', 'REJECTED');
 CREATE TYPE court_status_enum AS ENUM ('ACTIVE', 'MAINTENANCE', 'INACTIVE');
 CREATE TYPE club_status_enum AS ENUM ('ACTIVE', 'INACTIVE');
 CREATE TYPE payment_status_enum AS ENUM ('pending', 'paid', 'deposit_paid');
@@ -104,9 +104,12 @@ CREATE TABLE IF NOT EXISTS bookings (
     deposit_amount NUMERIC(12, 2) DEFAULT 0,
     payment_status payment_status_enum NOT NULL DEFAULT 'pending',
     
-    -- Trạng thái
+    -- Trạng thái & Vòng đời Check-in / No-Show
     booking_status booking_status_enum NOT NULL DEFAULT 'PENDING',
     hold_expires_at TIMESTAMPTZ, -- Tự giải phóng sau 5 phút nếu là HOLD
+    checkin_time TIMESTAMPTZ,    -- Mốc giờ nhân viên xác nhận khách check-in tại quầy
+    no_show_reason TEXT,         -- Lý do ghi nhận khi khách không đến (No-show)
+    last_reminder_sent_at TIMESTAMPTZ, -- Thời điểm gửi nhắc nhở check-in lần cuối
     notes TEXT,
     created_by_role VARCHAR(50) DEFAULT 'customer',
     created_at TIMESTAMPTZ DEFAULT NOW(),

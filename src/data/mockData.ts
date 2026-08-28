@@ -474,7 +474,7 @@ export const INITIAL_BOOKINGS: Booking[] = [
     createdByRole: 'customer',
     createdAt: '2026-08-22T08:30:00Z'
   },
-  // 3. Vãng lai (CONFIRMED)
+  // 3. Vãng lai (CHECKED_IN - Đã check-in tại quầy)
   {
     id: 'bk-cas-01',
     bookingCode: 'BSB-2608-CAS1',
@@ -493,8 +493,9 @@ export const INITIAL_BOOKINGS: Booking[] = [
     discountAmount: 0,
     depositAmount: 300000,
     paymentStatus: 'paid',
-    bookingStatus: 'CONFIRMED',
-    notes: 'Khách thuê thêm 2 vợt test',
+    bookingStatus: 'CHECKED_IN',
+    checkinTime: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
+    notes: 'Khách đã đến quầy và check-in thành công',
     createdByRole: 'customer',
     createdAt: '2026-08-22T14:00:00Z'
   },
@@ -722,7 +723,7 @@ export const INITIAL_BOOKINGS: Booking[] = [
     createdByRole: 'customer',
     createdAt: '2026-08-21T18:00:00Z'
   },
-  // 12. Đã hủy (CANCELLED)
+  // 12. Khách không đến (NO_SHOW - Tự động giải phóng sân)
   {
     id: 'bk-cas-04',
     bookingCode: 'BSB-2608-CAS4',
@@ -741,8 +742,9 @@ export const INITIAL_BOOKINGS: Booking[] = [
     discountAmount: 0,
     depositAmount: 0,
     paymentStatus: 'pending',
-    bookingStatus: 'CANCELLED',
-    notes: 'Khách báo bận việc đột xuất trước 24h',
+    bookingStatus: 'NO_SHOW',
+    noShowReason: 'Quá 30 phút không check-in (Tự động giải phóng sân)',
+    notes: 'Khách không đến nhận sân',
     createdByRole: 'customer',
     createdAt: '2026-08-20T12:00:00Z'
   }

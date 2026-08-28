@@ -6,7 +6,7 @@ import {
   Activity, Layers, AlertCircle, FileText, Database, 
   RefreshCw, Lock, Sparkles, AlertTriangle, ArrowUpRight,
   Ban, Unlock, CalendarClock, ArrowRightLeft, Mail, Send, Search,
-  UserCheck, UserX, Bell, AlertOctagon
+  UserCheck, UserX, Bell, AlertOctagon, QrCode, Camera, Phone, ScanLine, Smartphone
 } from 'lucide-react';
 import { Club, Booking, Minitour, Court, BookingType, BookingStatus, User, CourtBlock, EmailNotification } from '../../types';
 import { DatabaseService, isSupabaseConfigured, checkSlotConflict } from '../../lib/supabase';
@@ -92,6 +92,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [bookingSortBy, setBookingSortBy] = useState<'pending_first' | 'time_asc' | 'time_desc' | 'created_desc'>('pending_first');
   const [bookingSearchQuery, setBookingSearchQuery] = useState('');
+
+  // Check-in Scanner & Search Modal State
+  const [showCheckinModal, setShowCheckinModal] = useState(false);
+  const [checkinTargetBooking, setCheckinTargetBooking] = useState<Booking | null>(null);
+  const [checkinInputQuery, setCheckinInputQuery] = useState('');
+  const [checkinActiveTab, setCheckinActiveTab] = useState<'scan' | 'phone'>('scan');
+  const [checkinScanInput, setCheckinScanInput] = useState('');
+  const [checkinFeedback, setCheckinFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // No-show Modal State
   const [noShowModalBooking, setNoShowModalBooking] = useState<Booking | null>(null);
@@ -635,24 +643,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </p>
               </div>
 
-              {/* Fast Search input for Check-in */}
-              <div className="relative w-full sm:w-72">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={bookingSearchQuery}
-                  onChange={e => setBookingSearchQuery(e.target.value)}
-                  placeholder="Tra cứu Mã booking / SĐT khách..."
-                  className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#11385E]"
-                />
-                {bookingSearchQuery && (
-                  <button
-                    onClick={() => setBookingSearchQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
-                  >
-                    ✕
-                  </button>
-                )}
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCheckinTargetBooking(null);
+                    setShowCheckinModal(true);
+                    setCheckinActiveTab('scan');
+                    setCheckinFeedback(null);
+                    setCheckinScanInput('');
+                    setCheckinInputQuery('');
+                  }}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer shrink-0"
+                  title="Mở máy quét mã QR / Tra cứu SĐT check-in tại quầy"
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span>Quét Mã / Check-in</span>
+                </button>
+
+                {/* Fast Search input for Check-in */}
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={bookingSearchQuery}
+                    onChange={e => setBookingSearchQuery(e.target.value)}
+                    placeholder="Tra cứu nhanh..."
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#11385E]"
+                  />
+                  {bookingSearchQuery && (
+                    <button
+                      onClick={() => setBookingSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -858,9 +885,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             {/* CHECK-IN BUTTON (Appears ONLY from 15 minutes before game time) */}
                             {canCheckin && (
                               <button
-                                onClick={() => onUpdateBookingStatus(b.id, 'CHECKED_IN', { checkinTime: new Date().toISOString() })}
+                                onClick={() => {
+                                  setCheckinTargetBooking(b);
+                                  setShowCheckinModal(true);
+                                  setCheckinActiveTab('phone');
+                                  setCheckinFeedback(null);
+                                  setCheckinInputQuery(b.customerPhone || b.bookingCode);
+                                }}
                                 className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-extrabold cursor-pointer flex items-center gap-1 shadow-xs"
-                                title="Xác nhận khách đã đến sân (Từ 15p trước giờ chơi)"
+                                title="Mở giao diện quét mã / xác nhận check-in (Từ 15p trước giờ chơi)"
                               >
                                 <UserCheck className="w-3 h-3" />
                                 Check-in
@@ -1865,6 +1898,414 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 >
                   <UserX className="w-4 h-4" />
                   Xác Nhận & Giải Phóng Sân
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* RECEPTION CHECK-IN SCANNER & PHONE LOOKUP MODAL */}
+      <AnimatePresence>
+        {showCheckinModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs font-sans"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-5 border border-emerald-200 overflow-hidden max-h-[90vh] flex flex-col"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center shadow-xs">
+                    <UserCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-base text-[#11385E]">
+                      Check-in Khách Đến Sân BSB
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Quét mã QR trên vé hoặc nhập số điện thoại để xác nhận
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowCheckinModal(false);
+                    setCheckinTargetBooking(null);
+                    setCheckinFeedback(null);
+                  }}
+                  className="p-1.5 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Feedback notification if any */}
+              {checkinFeedback && (
+                <div className={`p-3 rounded-2xl text-xs font-bold flex items-center gap-2 ${
+                  checkinFeedback.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                    : 'bg-rose-50 text-rose-800 border border-rose-200'
+                }`}>
+                  {checkinFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  )}
+                  <span>{checkinFeedback.message}</span>
+                </div>
+              )}
+
+              {/* Mode Switcher Tabs */}
+              <div className="flex bg-slate-100 p-1 rounded-2xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCheckinActiveTab('scan');
+                    setCheckinFeedback(null);
+                  }}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    checkinActiveTab === 'scan'
+                      ? 'bg-white text-[#11385E] shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <ScanLine className="w-4 h-4 text-emerald-600" />
+                  <span>Quét Mã QR / Barcode</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCheckinActiveTab('phone');
+                    setCheckinFeedback(null);
+                  }}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    checkinActiveTab === 'phone'
+                      ? 'bg-white text-[#11385E] shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Phone className="w-4 h-4 text-blue-600" />
+                  <span>Nhập SĐT / Mã Booking</span>
+                </button>
+              </div>
+
+              {/* TAB 1: SCANNER MODE */}
+              {checkinActiveTab === 'scan' && (
+                <div className="space-y-4 overflow-y-auto pr-1">
+                  {/* Camera Scanner Viewfinder Simulation */}
+                  <div className="relative bg-slate-950 rounded-2xl p-6 text-center overflow-hidden border border-slate-800">
+                    {/* Animated Scanning Laser Beam */}
+                    <div className="absolute inset-x-0 h-0.5 bg-emerald-400 shadow-[0_0_12px_#34d399] animate-pulse z-10"
+                      style={{
+                        animation: 'scannerLaser 2s ease-in-out infinite alternate',
+                        top: '40%'
+                      }}
+                    />
+
+                    {/* Viewfinder Target Frame */}
+                    <div className="w-44 h-44 mx-auto border-2 border-emerald-500/60 rounded-3xl relative flex flex-col items-center justify-center p-4 bg-emerald-950/20 backdrop-blur-2xs">
+                      {/* Corner Target Brackets */}
+                      <span className="absolute top-1 left-1 w-4 h-4 border-t-2 border-l-2 border-emerald-400 rounded-tl-lg"></span>
+                      <span className="absolute top-1 right-1 w-4 h-4 border-t-2 border-r-2 border-emerald-400 rounded-tr-lg"></span>
+                      <span className="absolute bottom-1 left-1 w-4 h-4 border-b-2 border-l-2 border-emerald-400 rounded-bl-lg"></span>
+                      <span className="absolute bottom-1 right-1 w-4 h-4 border-b-2 border-r-2 border-emerald-400 rounded-br-lg"></span>
+
+                      <QrCode className="w-16 h-16 text-emerald-400 opacity-80 animate-pulse" />
+                      <span className="text-[10px] text-emerald-300 font-mono mt-2 font-bold uppercase tracking-wider">
+                        Đang chờ quét...
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 mt-3">
+                      Đưa mã QR trên vé đặt sân hoặc màn hình điện thoại của khách vào khung quét
+                    </p>
+                  </div>
+
+                  {/* Manual / Barcode Gun Input */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-700">
+                      Nhập mã quét từ súng Barcode / Máy đọc:
+                    </label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <ScanLine className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={checkinScanInput}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setCheckinScanInput(val);
+                            // Auto match if code looks like a booking code
+                            if (val.length >= 6) {
+                              const found = bookings.find(b => 
+                                b.bookingCode.toLowerCase() === val.trim().toLowerCase() ||
+                                b.id.toLowerCase() === val.trim().toLowerCase()
+                              );
+                              if (found) {
+                                setCheckinTargetBooking(found);
+                                setCheckinFeedback({
+                                  type: 'success',
+                                  message: `✓ Đã tìm thấy booking: ${found.bookingCode} (${found.customerName})`
+                                });
+                              }
+                            }
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && checkinScanInput.trim()) {
+                              const found = bookings.find(b => 
+                                b.bookingCode.toLowerCase().includes(checkinScanInput.trim().toLowerCase()) ||
+                                (b.customerPhone && b.customerPhone.includes(checkinScanInput.trim()))
+                              );
+                              if (found) {
+                                setCheckinTargetBooking(found);
+                                setCheckinFeedback({
+                                  type: 'success',
+                                  message: `✓ Đã khớp: ${found.bookingCode} (${found.customerName})`
+                                });
+                              } else {
+                                setCheckinFeedback({
+                                  type: 'error',
+                                  message: 'Không tìm thấy đơn đặt sân phù hợp với mã vừa nhập!'
+                                });
+                              }
+                            }
+                          }}
+                          placeholder="Quét mã barcode (VD: BSB-CAS-178...)"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!checkinScanInput.trim()) return;
+                          const found = bookings.find(b => 
+                            b.bookingCode.toLowerCase().includes(checkinScanInput.trim().toLowerCase()) ||
+                            (b.customerPhone && b.customerPhone.includes(checkinScanInput.trim()))
+                          );
+                          if (found) {
+                            setCheckinTargetBooking(found);
+                            setCheckinFeedback({
+                              type: 'success',
+                              message: `✓ Đã khớp: ${found.bookingCode} (${found.customerName})`
+                            });
+                          } else {
+                            setCheckinFeedback({
+                              type: 'error',
+                              message: 'Không tìm thấy đơn đặt sân phù hợp!'
+                            });
+                          }
+                        }}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        Tìm Mã
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Fast testing scan chips */}
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                    <span className="text-[11px] font-bold text-slate-500 block">
+                      ⚡ Thử quét nhanh các vé đặt hôm nay:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {bookings.filter(b => b.bookingStatus !== 'CANCELLED' && b.bookingStatus !== 'COMPLETED').slice(0, 4).map(b => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => {
+                            setCheckinScanInput(b.bookingCode);
+                            setCheckinTargetBooking(b);
+                            setCheckinFeedback({
+                              type: 'success',
+                              message: `✓ Đã nhận diện mã: ${b.bookingCode} (${b.customerName})`
+                            });
+                          }}
+                          className="px-2.5 py-1 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-lg text-[11px] font-mono text-slate-700 hover:text-emerald-700 font-bold transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          <QrCode className="w-3 h-3 text-emerald-600" />
+                          <span>{b.bookingCode}</span>
+                          <span className="text-[10px] text-slate-400 font-sans">({b.customerName})</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: MANUAL PHONE & CODE LOOKUP */}
+              {checkinActiveTab === 'phone' && (
+                <div className="space-y-3.5 overflow-y-auto pr-1">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={checkinInputQuery}
+                      onChange={e => setCheckinInputQuery(e.target.value)}
+                      placeholder="Nhập Số điện thoại (VD: 0908...) hoặc Tên khách..."
+                      className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      autoFocus
+                    />
+                    {checkinInputQuery && (
+                      <button
+                        onClick={() => setCheckinInputQuery('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Matching Bookings List */}
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {bookings
+                      .filter(b => {
+                        const q = checkinInputQuery.trim().toLowerCase();
+                        if (!q) return b.bookingStatus === 'CHECKIN_PENDING' || b.bookingStatus === 'CONFIRMED';
+                        return (
+                          (b.customerPhone && b.customerPhone.includes(q)) ||
+                          b.customerName.toLowerCase().includes(q) ||
+                          b.bookingCode.toLowerCase().includes(q)
+                        );
+                      })
+                      .slice(0, 6)
+                      .map(b => {
+                        const isSelected = checkinTargetBooking?.id === b.id;
+                        return (
+                          <div
+                            key={b.id}
+                            onClick={() => {
+                              setCheckinTargetBooking(b);
+                              setCheckinFeedback(null);
+                            }}
+                            className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                              isSelected
+                                ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-500/20'
+                                : 'bg-slate-50 hover:bg-slate-100/80 border-slate-200'
+                            }`}
+                          >
+                            <div className="space-y-0.5 text-xs">
+                              <div className="flex items-center gap-2 font-bold text-slate-900">
+                                <span>{b.customerName}</span>
+                                <span className="font-mono text-[10px] text-blue-700 bg-blue-100 px-1.5 py-0.2 rounded">
+                                  {b.customerPhone}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-500 font-medium">
+                                {b.courtName} • {b.date} ({b.startTime} - {b.endTime})
+                              </div>
+                            </div>
+
+                            <div className="text-right text-xs">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold block mb-1 ${
+                                b.bookingStatus === 'CHECKED_IN'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : b.bookingStatus === 'CHECKIN_PENDING'
+                                  ? 'bg-amber-100 text-amber-900'
+                                  : 'bg-teal-100 text-teal-800'
+                              }`}>
+                                {b.bookingStatus === 'CHECKED_IN' ? '✓ Đã Check-in' : b.bookingStatus === 'CHECKIN_PENDING' ? '⏳ Chờ Check-in' : b.bookingStatus}
+                              </span>
+                              <span className="font-bold text-slate-700">{b.totalAmount.toLocaleString('vi-VN')}đ</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* SELECTED BOOKING VERIFICATION CARD & CONFIRM BUTTON */}
+              {checkinTargetBooking && (
+                <div className="p-4 bg-emerald-50/90 border-2 border-emerald-400 rounded-3xl space-y-3 pt-3.5">
+                  <div className="flex items-center justify-between border-b border-emerald-200 pb-2">
+                    <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Thông Tin Vé Cần Check-in
+                    </span>
+                    <span className="font-mono font-bold text-xs text-[#11385E] bg-white px-2 py-0.5 rounded-md border border-emerald-300">
+                      {checkinTargetBooking.bookingCode}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Khách hàng:</span>
+                      <span className="font-bold text-slate-900">{checkinTargetBooking.customerName}</span>
+                      <span className="block text-[11px] text-slate-600 font-mono">{checkinTargetBooking.customerPhone}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Sân & Thời gian:</span>
+                      <span className="font-bold text-[#11385E]">{checkinTargetBooking.courtName}</span>
+                      <span className="block text-[11px] text-slate-600 font-medium">
+                        {checkinTargetBooking.date} ({checkinTargetBooking.startTime} - {checkinTargetBooking.endTime})
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-emerald-100">
+                    <span className="text-slate-600">
+                      Trạng thái hiện tại:{' '}
+                      <strong className="text-emerald-800 font-bold">{checkinTargetBooking.bookingStatus}</strong>
+                    </span>
+                    {checkinTargetBooking.checkinTime && (
+                      <span className="text-[10px] text-emerald-700 font-mono">
+                        Đã check-in lúc: {checkinTargetBooking.checkinTime.split('T')[1]?.substring(0, 5)}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Big Action Buttons */}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setCheckinTargetBooking(null)}
+                      className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs border border-slate-200 cursor-pointer"
+                    >
+                      Đổi vé khác
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const checkinIso = new Date().toISOString();
+                        onUpdateBookingStatus(checkinTargetBooking.id, 'CHECKED_IN', {
+                          checkinTime: checkinIso
+                        });
+                        setCheckinFeedback({
+                          type: 'success',
+                          message: `🎉 Check-in thành công cho khách ${checkinTargetBooking.customerName}! Sân đã sẵn sàng.`
+                        });
+                        setCheckinTargetBooking(prev => prev ? { ...prev, bookingStatus: 'CHECKED_IN', checkinTime: checkinIso } : null);
+                      }}
+                      disabled={checkinTargetBooking.bookingStatus === 'CHECKED_IN'}
+                      className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <UserCheck className="w-4 h-4" />
+                      <span>{checkinTargetBooking.bookingStatus === 'CHECKED_IN' ? '✓ Đã Check-in Thành Công' : '✓ Xác Nhận Check-in Ngay'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Close Button Footer */}
+              <div className="pt-1 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCheckinModal(false);
+                    setCheckinTargetBooking(null);
+                    setCheckinFeedback(null);
+                  }}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  Đóng Cửa Sổ
                 </button>
               </div>
             </motion.div>

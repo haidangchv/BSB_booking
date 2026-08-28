@@ -232,6 +232,9 @@ export const DatabaseService = {
             paymentStatus: b.payment_status,
             bookingStatus: b.booking_status,
             holdExpiresAt: b.hold_expires_at,
+            checkinTime: b.checkin_time,
+            noShowReason: b.no_show_reason,
+            lastReminderSentAt: b.last_reminder_sent_at,
             notes: b.notes,
             createdByRole: b.created_by_role,
             createdAt: b.created_at
@@ -281,6 +284,9 @@ export const DatabaseService = {
           payment_status: booking.paymentStatus,
           booking_status: booking.bookingStatus,
           hold_expires_at: booking.holdExpiresAt,
+          checkin_time: booking.checkinTime,
+          no_show_reason: booking.noShowReason,
+          last_reminder_sent_at: booking.lastReminderSentAt,
           notes: booking.notes,
           created_by_role: booking.createdByRole || 'customer'
         }]);
@@ -295,10 +301,21 @@ export const DatabaseService = {
     return booking;
   },
 
-  async updateBookingStatus(id: string, status: BookingStatus, paymentStatus?: 'pending' | 'paid' | 'deposit_paid'): Promise<Booking[]> {
+  async updateBookingStatus(
+    id: string, 
+    status: BookingStatus, 
+    paymentStatus?: 'pending' | 'paid' | 'deposit_paid',
+    extraFields?: { checkinTime?: string; noShowReason?: string; lastReminderSentAt?: string }
+  ): Promise<Booking[]> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const updatePayload: any = { booking_status: status, updated_at: new Date().toISOString() };
+        const updatePayload: any = { 
+          booking_status: status, 
+          updated_at: new Date().toISOString(),
+          ...(extraFields?.checkinTime !== undefined ? { checkin_time: extraFields.checkinTime } : (status === 'CHECKED_IN' ? { checkin_time: new Date().toISOString() } : {})),
+          ...(extraFields?.noShowReason !== undefined ? { no_show_reason: extraFields.noShowReason } : {}),
+          ...(extraFields?.lastReminderSentAt !== undefined ? { last_reminder_sent_at: extraFields.lastReminderSentAt } : {})
+        };
         if (paymentStatus) updatePayload.payment_status = paymentStatus;
         await supabase.from('bookings').update(updatePayload).eq('id', id);
       } catch (err) {
@@ -313,6 +330,9 @@ export const DatabaseService = {
           ...b,
           bookingStatus: status,
           ...(paymentStatus ? { paymentStatus } : {}),
+          checkinTime: extraFields?.checkinTime !== undefined ? extraFields.checkinTime : (status === 'CHECKED_IN' ? new Date().toISOString() : b.checkinTime),
+          noShowReason: extraFields?.noShowReason !== undefined ? extraFields.noShowReason : b.noShowReason,
+          lastReminderSentAt: extraFields?.lastReminderSentAt !== undefined ? extraFields.lastReminderSentAt : b.lastReminderSentAt,
           updatedAt: new Date().toISOString()
         };
       }
@@ -402,7 +422,7 @@ export function checkSlotConflict(
 
   for (const b of existingBookings) {
     if (candidate.excludeBookingId && b.id === candidate.excludeBookingId) continue;
-    if (b.bookingStatus === 'CANCELLED' || b.bookingStatus === 'REJECTED') continue;
+    if (b.bookingStatus === 'CANCELLED' || b.bookingStatus === 'REJECTED' || b.bookingStatus === 'NO_SHOW') continue;
 
     // Check temporary HOLD expiry (5 minutes)
     if (b.bookingStatus === 'HOLD' && b.holdExpiresAt) {
