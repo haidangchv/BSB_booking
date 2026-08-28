@@ -19,6 +19,7 @@ import {
 import { Court, Club, Minitour, Booking, TournamentTeam, User, BookingType } from './types';
 import { DatabaseService } from './lib/supabase';
 import { EmailService } from './lib/emailService';
+import { syncBookingsLifecycle } from './lib/bookingLifecycle';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'booking' | 'clubs' | 'minitour' | 'admin'>('booking');
@@ -80,9 +81,10 @@ export default function App() {
           DatabaseService.getBookings(),
           DatabaseService.getMinitours()
         ]);
+        const { updatedBookings } = syncBookingsLifecycle(loadedBookings);
         setCourts(loadedCourts);
         setClubs(loadedClubs);
-        setBookings(loadedBookings);
+        setBookings(updatedBookings);
         setMinitours(loadedMinitours);
       } catch (err) {
         console.error('Error loading data from database service:', err);
@@ -91,6 +93,30 @@ export default function App() {
       }
     }
     loadData();
+  }, []);
+
+  // Real-time booking lifecycle status auto-transitions:
+  // - 15m before game: CONFIRMED -> CHECKIN_PENDING (Chờ check-in)
+  // - Admin check-in: CHECKED_IN
+  // - 15-30m late without check-in: Grace period warning (Nhắc lịch)
+  // - >30m late without check-in: Auto NO_SHOW & Release court
+  // - After end time: CHECKED_IN -> COMPLETED
+  useEffect(() => {
+    const sweep = () => {
+      setBookings(prev => {
+        const { updatedBookings, hasChanges } = syncBookingsLifecycle(prev);
+        if (hasChanges) {
+          try {
+            localStorage.setItem('bsb_custom_bookings_v2', JSON.stringify(updatedBookings));
+          } catch {}
+          return updatedBookings;
+        }
+        return prev;
+      });
+    };
+    sweep();
+    const interval = setInterval(sweep, 15000); // Check every 15s
+    return () => clearInterval(interval);
   }, []);
 
   // Auth Handlers
@@ -132,15 +158,39 @@ export default function App() {
     await DatabaseService.createClub(newClub);
   };
 
-  const handleUpdateBookingStatus = async (id: string, status: Booking['bookingStatus']) => {
-    const updated = await DatabaseService.updateBookingStatus(id, status);
-    setBookings(updated);
+  const handleUpdateBookingStatus = async (
+    id: string, 
+    status: Booking['bookingStatus'],
+    extraFields?: { checkinTime?: string; noShowReason?: string; lastReminderSentAt?: string }
+  ) => {
+    setBookings(prev => {
+      const updated = prev.map(b => {
+        if (b.id === id) {
+          return {
+            ...b,
+            bookingStatus: status,
+            checkinTime: extraFields?.checkinTime !== undefined ? extraFields.checkinTime : (status === 'CHECKED_IN' ? new Date().toISOString() : b.checkinTime),
+            noShowReason: extraFields?.noShowReason !== undefined ? extraFields.noShowReason : b.noShowReason,
+            lastReminderSentAt: extraFields?.lastReminderSentAt !== undefined ? extraFields.lastReminderSentAt : b.lastReminderSentAt,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return b;
+      });
+      try {
+        localStorage.setItem('bsb_custom_bookings_v2', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
 
     // Send transactional status change email
-    const target = updated.find(b => b.id === id);
+    const target = bookings.find(b => b.id === id);
     if (target) {
-      const templateType = status === 'CONFIRMED' ? 'CONFIRMED' : status === 'CANCELLED' ? 'CANCELLED' : status === 'REJECTED' ? 'REJECTED' : 'PENDING';
-      EmailService.sendBookingConfirmationEmail(target, templateType).catch(console.warn);
+      const targetWithStatus = { ...target, bookingStatus: status, ...extraFields };
+      if (status === 'CONFIRMED' || status === 'CANCELLED' || status === 'REJECTED' || status === 'NO_SHOW') {
+        const templateType = status === 'CONFIRMED' ? 'CONFIRMED' : status === 'CANCELLED' ? 'CANCELLED' : status === 'REJECTED' ? 'REJECTED' : 'PENDING';
+        EmailService.sendBookingConfirmationEmail(targetWithStatus, templateType).catch(console.warn);
+      }
     }
   };
 

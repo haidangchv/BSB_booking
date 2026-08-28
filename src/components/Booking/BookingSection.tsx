@@ -59,7 +59,28 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
   );
   const [selectedCourtId, setSelectedCourtId] = useState<string>(courts[0]?.id || 'court-1');
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
+  const [casualCourtFilter, setCasualCourtFilter] = useState<'all' | 'vip' | 'training' | 'standard' | 'indoor' | 'outdoor'>('all');
   
+  // Default: Show slots from current time onwards (hide past slots)
+  const [hidePastSlots, setHidePastSlots] = useState<boolean>(true);
+  const gridContainerRef = React.useRef<HTMLDivElement>(null);
+
+  // Real-time live clock in minutes (for Live Timeline Red Line)
+  const [currentMinutes, setCurrentMinutes] = useState<number>(() => {
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes();
+  });
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentMinutes(now.getHours() * 60 + now.getMinutes());
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 15000); // sync every 15s
+    return () => clearInterval(interval);
+  }, []);
+
   // 5-minute HOLD Timer state
   const [holdSecondsLeft, setHoldSecondsLeft] = useState<number | null>(null);
 
@@ -151,6 +172,44 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
     '21:30 - 22:00', '22:00 - 22:30', '22:30 - 23:00'
   ], []);
 
+  // Time slots to display based on selected date & hidePastSlots filter (default: from now onwards)
+  const displayedTimeSlots = useMemo(() => {
+    const todayIso = new Date().toISOString().split('T')[0];
+    if (selectedDate === todayIso && hidePastSlots) {
+      const currentSlotIndex = timeSlots.findIndex(slot => {
+        const [endH, endM] = slot.split(' - ')[1].split(':').map(Number);
+        const slotEndMinutes = endH * 60 + (endM || 0);
+        return slotEndMinutes > currentMinutes; // keep current & future slots
+      });
+      if (currentSlotIndex !== -1) {
+        return timeSlots.slice(currentSlotIndex);
+      }
+    }
+    return timeSlots;
+  }, [timeSlots, selectedDate, hidePastSlots, currentMinutes]);
+
+  // Auto-scroll when viewing today or toggling view mode
+  useEffect(() => {
+    const todayIso = new Date().toISOString().split('T')[0];
+    if (selectedDate === todayIso && gridContainerRef.current) {
+      if (!hidePastSlots) {
+        const currentSlotIndex = timeSlots.findIndex(slot => {
+          const [startH, startM] = slot.split(' - ')[0].split(':').map(Number);
+          const slotStartMinutes = startH * 60 + (startM || 0);
+          return slotStartMinutes >= currentMinutes - 30;
+        });
+        if (currentSlotIndex > 0) {
+          gridContainerRef.current.scrollTo({
+            top: Math.max(0, currentSlotIndex * 44 - 44),
+            behavior: 'smooth'
+          });
+        }
+      } else {
+        gridContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+  }, [selectedDate, hidePastSlots, currentMinutes]);
+
   // Quick 7 days for day selector
   const dateOptions = useMemo(() => {
     const dates = [];
@@ -195,8 +254,37 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
   // Check if slot on a specific court and date is occupied
   const getSlotBookingInfo = (courtId: string, slotStr: string, dateStr: string) => {
     const [start, end] = slotStr.split(' - ');
+    // Check court blocks first
+    try {
+      const blocks = JSON.parse(localStorage.getItem('bsb_court_blocks_v2') || '[]');
+      const blockMatch = blocks.find((bl: any) => {
+        if (bl.courtId !== courtId || bl.date !== dateStr) return false;
+        return bl.startTime <= start && bl.endTime >= end;
+      });
+      if (blockMatch) {
+        return {
+          id: blockMatch.id,
+          bookingCode: 'BLOCK',
+          bookingType: 'block' as any,
+          customerName: `Khóa: ${blockMatch.reason || 'Bảo trì'}`,
+          bookingStatus: 'HOLD' as any,
+          courtId,
+          courtName: '',
+          date: dateStr,
+          startTime: start,
+          endTime: end,
+          totalAmount: 0,
+          discountAmount: 0,
+          depositAmount: 0,
+          customerPhone: '',
+          paymentStatus: 'PAID',
+          createdAt: ''
+        } as unknown as Booking;
+      }
+    } catch {}
+
     return bookings.find(b => {
-      if (b.bookingStatus === 'CANCELLED' || b.bookingStatus === 'REJECTED') return false;
+      if (b.bookingStatus === 'CANCELLED' || b.bookingStatus === 'REJECTED' || b.bookingStatus === 'NO_SHOW') return false;
       const bCourtIds = b.courtIds && b.courtIds.length > 0 ? b.courtIds : [b.courtId];
       if (!bCourtIds.includes(courtId)) return false;
 
@@ -213,9 +301,110 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
     });
   };
 
+  // Color & badge styling for booked slot tags in Grid
+  const getBookingTagInfo = (b: Booking) => {
+    switch (b.bookingType) {
+      case 'clb':
+        return {
+          type: 'clb',
+          badgeText: `👥 CLB ${b.clubName ? `• ${b.clubName}` : ''}`,
+          shortText: b.clubName || b.customerName || 'CLB',
+          bgClass: 'bg-indigo-600 text-white border-indigo-700 shadow-xs hover:bg-indigo-700',
+          dotColor: 'bg-indigo-400',
+          label: 'Câu Lạc Bộ'
+        };
+      case 'minitour':
+        return {
+          type: 'minitour',
+          badgeText: `🏆 Giải Minitour`,
+          shortText: 'Minitour BSB',
+          bgClass: 'bg-amber-500 text-slate-950 font-black border-amber-600 shadow-xs hover:bg-amber-400',
+          dotColor: 'bg-amber-900',
+          label: 'Minitour'
+        };
+      case 'fixed':
+        return {
+          type: 'fixed',
+          badgeText: `📅 Lịch Cố Định`,
+          shortText: 'Cố Định',
+          bgClass: 'bg-slate-700 text-slate-100 border-slate-800 shadow-xs hover:bg-slate-800',
+          dotColor: 'bg-slate-400',
+          label: 'Cố Định'
+        };
+      case 'casual':
+        return {
+          type: 'casual',
+          badgeText: `🎾 Vãng Lai: ${b.customerName}`,
+          shortText: b.customerName || 'Vãng Lai',
+          bgClass: 'bg-blue-600 text-white border-blue-700 shadow-xs hover:bg-blue-700',
+          dotColor: 'bg-blue-300',
+          label: 'Vãng Lai'
+        };
+      case 'event':
+        return {
+          type: 'event',
+          badgeText: `🎪 Sự Kiện`,
+          shortText: 'Sự Kiện',
+          bgClass: 'bg-purple-600 text-white border-purple-700 shadow-xs hover:bg-purple-700',
+          dotColor: 'bg-purple-300',
+          label: 'Sự Kiện'
+        };
+      case 'block' as any:
+        return {
+          type: 'block',
+          badgeText: `🔒 ${b.customerName || 'Khóa Sân'}`,
+          shortText: 'Khóa Sân',
+          bgClass: 'bg-rose-600 text-white border-rose-700 bg-[repeating-linear-gradient(45deg,transparent,transparent_6px,rgba(0,0,0,0.15)_6px,rgba(0,0,0,0.15)_12px)] shadow-xs',
+          dotColor: 'bg-rose-300',
+          label: 'Khóa / Bảo Trì'
+        };
+      default:
+        return {
+          type: 'other',
+          badgeText: `Đã Đặt: ${b.customerName}`,
+          shortText: b.customerName || 'Đã Đặt',
+          bgClass: 'bg-slate-600 text-white border-slate-700 shadow-xs',
+          dotColor: 'bg-slate-400',
+          label: 'Đã Đặt'
+        };
+    }
+  };
+
+  // Helper to check if a slot is in the past
+  const isSlotInPast = (slotStr: string, dateStr: string, nowMinutes: number) => {
+    const todayIso = new Date().toISOString().split('T')[0];
+    if (dateStr < todayIso) return true;
+    if (dateStr > todayIso) return false;
+    const [startStr] = slotStr.split(' - ');
+    const [h, m] = startStr.split(':').map(Number);
+    const startMin = h * 60 + (m || 0);
+    return startMin < nowMinutes;
+  };
+
+  // Clean up selected slots if they become past
+  useEffect(() => {
+    const todayIso = new Date().toISOString().split('T')[0];
+    if (selectedDate < todayIso) {
+      if (selectedSlots.length > 0) setSelectedSlots([]);
+    } else if (selectedDate === todayIso) {
+      const validSlots = selectedSlots.filter(s => !isSlotInPast(s, selectedDate, currentMinutes));
+      if (validSlots.length !== selectedSlots.length) {
+        setSelectedSlots(validSlots);
+      }
+    }
+  }, [selectedDate, currentMinutes]);
+
   // Toggle slot for casual
-  const handleToggleSlot = (slot: string) => {
+  const handleToggleSlot = (slot: string, courtId?: string) => {
     setConflictError(null);
+    if (isSlotInPast(slot, selectedDate, currentMinutes)) {
+      return; // Cannot select past slots
+    }
+    if (courtId && courtId !== selectedCourtId) {
+      setSelectedCourtId(courtId);
+      setSelectedSlots([slot]);
+      return;
+    }
     if (selectedSlots.includes(slot)) {
       setSelectedSlots(selectedSlots.filter(s => s !== slot));
     } else {
@@ -1551,7 +1740,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 4. CASUAL (VÃNG LAI) BOOKING FORM */}
+      {/* 4. CASUAL (VÃNG LAI) BOOKING FORM - SCHEDULE MATRIX GRID VIEW */}
       {/* ========================================================================= */}
       {bookingType === 'casual' && (
         <motion.div
@@ -1562,135 +1751,480 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
           transition={{ duration: 0.28, ease: "easeOut" }}
           className="grid grid-cols-1 lg:grid-cols-12 gap-8"
         >
-          <div className="lg:col-span-8 space-y-6">
-            {/* Step 1: Date */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2 mb-3">
-                <Calendar className="w-4 h-4 text-[#11385E]" />
-                Bước 1: Chọn Ngày Chơi
-              </span>
+          <div className="lg:col-span-8 space-y-5">
+            {/* Step 1: Date & Filter Controls Header */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-[#11385E]" />
+                    Bước 1: Chọn Ngày & Lọc Sân
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Lịch trực quan dạng Matrix Grid theo thời gian thực 05:30 - 23:00
+                  </p>
+                </div>
+
+                {/* Quick Native Date Picker */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-600">Chọn ngày khác:</span>
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    min={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-[#11385E] focus:ring-2 focus:ring-[#11385E] focus:outline-none cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {/* 7 Quick Date Pills */}
               <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
-                {dateOptions.map((item) => (
-                  <button
-                    key={item.date}
-                    type="button"
-                    onClick={() => setSelectedDate(item.date)}
-                    className={`py-2 px-2 rounded-xl text-xs font-bold transition-all text-center cursor-pointer border ${
-                      selectedDate === item.date
-                        ? 'bg-[#11385E] text-white border-[#11385E]'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Step 2: Court */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
-                  <MapPin className="w-4 h-4 text-[#11385E]" />
-                  Bước 2: Chọn Sân Chơi (7 Sân Chuẩn Quốc Tế & 2 Sân Tập Nhỏ)
-                </span>
-                <span className="text-[11px] text-slate-500 font-semibold">
-                  Sân 6, 7 (VIP) • Sân 8, 9 (Sân tập)
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {courts.map((court) => {
-                  const isSelected = selectedCourtId === court.id;
-                  const isVip = court.id === 'court-6' || court.id === 'court-7' || court.category === 'vip';
-                  const isTraining = court.id === 'court-8' || court.id === 'court-9' || court.category === 'training';
-
-                  return (
-                    <div
-                      key={court.id}
-                      onClick={() => { setSelectedCourtId(court.id); setSelectedSlots([]); }}
-                      className={`p-3 rounded-xl border transition-all cursor-pointer text-left relative ${
-                        isSelected
-                          ? 'bg-blue-50/70 border-[#11385E] ring-2 ring-[#11385E]/20 shadow-xs'
-                          : isVip
-                          ? 'bg-amber-50/30 border-amber-200 hover:border-amber-400'
-                          : isTraining
-                          ? 'bg-sky-50/30 border-sky-200 hover:border-sky-400'
-                          : 'bg-white border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <h4 className="font-bold text-xs text-slate-900">{court.name}</h4>
-                          {isVip && (
-                            <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-black rounded text-[9px]">
-                              ⭐ VIP
-                            </span>
-                          )}
-                          {isTraining && (
-                            <span className="px-1.5 py-0.2 bg-sky-500 text-white font-extrabold rounded text-[9px]">
-                              🎯 SÂN TẬP
-                            </span>
-                          )}
-                        </div>
-                        {isSelected && <CheckCircle2 className="w-4 h-4 text-[#11385E] shrink-0" />}
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-1 line-clamp-1">{court.surface}</p>
-                      <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-100">
-                        <span className="text-[11px] font-extrabold text-[#11385E]">
-                          {court.hourlyRateNormal.toLocaleString('vi-VN')}đ - {court.hourlyRatePeak.toLocaleString('vi-VN')}đ/h
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-medium capitalize">
-                          {court.type === 'center_court' ? 'Sân VIP' : court.type === 'indoor' ? 'Trong nhà' : 'Ngoài trời'}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Step 3: Slots Matrix */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2 mb-3">
-                <Clock className="w-4 h-4 text-[#11385E]" />
-                Bước 3: Chọn Khung Giờ Trống (Slot 30 phút)
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                {timeSlots.map((slot) => {
-                  const bookingInfo = getSlotBookingInfo(selectedCourtId, slot, selectedDate);
-                  const isSelected = selectedSlots.includes(slot);
-                  const isOccupied = Boolean(bookingInfo);
-
+                {dateOptions.map((item) => {
+                  const isSelected = selectedDate === item.date;
+                  const isToday = item.label === 'Hôm nay';
                   return (
                     <button
-                      key={slot}
+                      key={item.date}
                       type="button"
-                      disabled={isOccupied}
-                      onClick={() => handleToggleSlot(slot)}
-                      className={`py-2 px-3 rounded-lg text-xs font-medium border transition-all text-center ${
-                        isOccupied
-                          ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed line-through'
-                          : isSelected
-                            ? 'bg-[#11385E] text-white border-[#11385E] font-bold shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50 cursor-pointer'
+                      onClick={() => setSelectedDate(item.date)}
+                      className={`py-2 px-2 rounded-xl text-xs font-bold transition-all text-center cursor-pointer border relative ${
+                        isSelected
+                          ? 'bg-[#11385E] text-white border-[#11385E] shadow-xs ring-2 ring-[#11385E]/20'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
                       }`}
                     >
-                      {slot}
+                      {isToday && (
+                        <span className="absolute -top-1.5 right-1 px-1.5 py-0.2 bg-rose-500 text-white text-[8px] font-black rounded-full shadow-xs">
+                          LIVE
+                        </span>
+                      )}
+                      {item.label}
                     </button>
                   );
                 })}
               </div>
+
+              {/* Court Category Filter Pills */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-bold text-slate-600 mr-1 flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-[#11385E]" /> Sân:
+                  </span>
+                  {[
+                    { id: 'all', label: 'Tất Cả (9 Sân)' },
+                    { id: 'vip', label: '⭐ Sân VIP (6 & 7)' },
+                    { id: 'training', label: '🎯 Sân Tập (8 & 9)' },
+                    { id: 'standard', label: '🏆 USAPA (1-5)' },
+                    { id: 'indoor', label: '🏢 Trong Nhà' },
+                    { id: 'outdoor', label: '🌤️ Ngoài Trời' }
+                  ].map(f => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setCasualCourtFilter(f.id as any)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                        casualCourtFilter === f.id
+                          ? 'bg-[#11385E] text-white border-[#11385E]'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="text-[11px] font-bold text-[#11385E] bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-blue-600" />
+                  Giờ vàng (Peak): 16:00 - 23:00
+                </div>
+              </div>
+            </div>
+
+            {/* Color Legend Bar */}
+            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  Chú Thích Nhãn Lịch & Trạng Thái:
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">Click vào ô trống để chọn giờ</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2 text-[11px]">
+                <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded-lg border border-slate-200">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0"></span>
+                  <span className="font-semibold text-slate-700 truncate">Khả dụng</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-[#11385E] text-white px-2 py-1 rounded-lg font-bold border border-[#11385E]">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0 animate-pulse"></span>
+                  <span className="truncate">Đang chọn</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-blue-100 text-blue-950 px-2 py-1 rounded-lg font-bold border border-blue-300">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-600 shrink-0"></span>
+                  <span className="truncate">Vãng Lai</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-indigo-100 text-indigo-950 px-2 py-1 rounded-lg font-bold border border-indigo-300">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 shrink-0"></span>
+                  <span className="truncate">CLB Sinh Hoạt</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-amber-100 text-amber-950 px-2 py-1 rounded-lg font-bold border border-amber-400">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0"></span>
+                  <span className="truncate">Minitour</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-slate-200 text-slate-900 px-2 py-1 rounded-lg font-bold border border-slate-400">
+                  <span className="w-2.5 h-2.5 rounded-full bg-slate-700 shrink-0"></span>
+                  <span className="truncate">Lịch Cố Định</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-rose-100 text-rose-900 px-2 py-1 rounded-lg font-bold border border-rose-300">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-600 shrink-0"></span>
+                  <span className="truncate">Khóa / Bảo Trì</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-slate-100 text-slate-400 px-2 py-1 rounded-lg border border-slate-200 opacity-60">
+                  <span className="w-2.5 h-2.5 rounded-full bg-slate-400 shrink-0"></span>
+                  <span className="truncate line-through">Đã qua giờ</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Step 2 & 3: SCHEDULE MATRIX GRID TABLE */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-extrabold text-xs text-[#11385E]">
+                    BẢNG LỊCH MATRIX ({selectedDate})
+                  </span>
+                  <span className="text-[10px] text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200 font-semibold">
+                    {displayedTimeSlots.length} Khung Giờ (30p/slot)
+                  </span>
+
+                  {/* Toggle Mode for Today: From Now vs All Day */}
+                  {selectedDate === new Date().toISOString().split('T')[0] && (
+                    <div className="flex items-center bg-slate-200/80 p-0.5 rounded-xl text-[11px] font-bold gap-1 ml-1">
+                      <button
+                        type="button"
+                        onClick={() => setHidePastSlots(true)}
+                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                          hidePastSlots
+                            ? 'bg-[#11385E] text-white shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Từ Hiện Tại Trở Đi (Mặc định)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHidePastSlots(false)}
+                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                          !hidePastSlots
+                            ? 'bg-[#11385E] text-white shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Xem Cả Ngày (05:30 - 23:00)
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {selectedSlots.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 animate-pulse">
+                      ✓ Đã chọn {selectedSlots.length} slot ({selectedCourt?.name})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSlots([])}
+                      className="text-[11px] font-bold text-red-600 hover:text-red-700 underline cursor-pointer"
+                    >
+                      Bỏ chọn tất cả
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Matrix Grid with Sticky Headers & Live Indicator */}
+              <div ref={gridContainerRef} className="relative overflow-x-auto max-h-[620px] overflow-y-auto scroll-smooth">
+                <table className="w-full text-left border-collapse min-w-[760px]">
+                  {/* Sticky Top Court Header */}
+                  <thead className="sticky top-0 z-20 bg-slate-100/95 backdrop-blur-xs border-b border-slate-200 shadow-2xs">
+                    <tr>
+                      <th className="p-3 w-28 text-center text-xs font-bold text-slate-600 uppercase border-r border-slate-200 sticky left-0 z-30 bg-slate-100/95 backdrop-blur-xs">
+                        <div className="flex items-center justify-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-[#11385E]" />
+                          Giờ / Sân
+                        </div>
+                      </th>
+                      {courts
+                        .filter(c => {
+                          if (casualCourtFilter === 'vip') return c.category === 'vip' || c.id === 'court-6' || c.id === 'court-7';
+                          if (casualCourtFilter === 'training') return c.category === 'training' || c.id === 'court-8' || c.id === 'court-9';
+                          if (casualCourtFilter === 'standard') return c.category === 'standard' || (c.id >= 'court-1' && c.id <= 'court-5');
+                          if (casualCourtFilter === 'indoor') return c.type === 'indoor';
+                          if (casualCourtFilter === 'outdoor') return c.type === 'outdoor';
+                          return true;
+                        })
+                        .map(court => {
+                          const isCurrentActiveCourt = selectedCourtId === court.id;
+                          const isVip = court.id === 'court-6' || court.id === 'court-7' || court.category === 'vip';
+                          const isTraining = court.id === 'court-8' || court.id === 'court-9' || court.category === 'training';
+
+                          return (
+                            <th
+                              key={court.id}
+                              className={`p-2.5 text-center min-w-[130px] border-r border-slate-200 transition-colors ${
+                                isCurrentActiveCourt
+                                  ? 'bg-blue-50/90 text-[#11385E] border-b-2 border-b-[#11385E]'
+                                  : 'text-slate-800'
+                              }`}
+                            >
+                              <div className="flex items-center justify-center gap-1 font-extrabold text-xs">
+                                <span>{court.name}</span>
+                                {isVip && (
+                                  <span className="px-1 py-0.2 bg-amber-500 text-slate-950 text-[9px] font-black rounded">
+                                    VIP
+                                  </span>
+                                )}
+                                {isTraining && (
+                                  <span className="px-1 py-0.2 bg-sky-500 text-white text-[9px] font-black rounded">
+                                    TẬP
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-medium mt-0.5">
+                                {Math.round(court.hourlyRateNormal / 2000)}k - {Math.round(court.hourlyRatePeak / 2000)}k / slot
+                              </div>
+                            </th>
+                          );
+                        })}
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-100 relative">
+                    {/* REAL-TIME LIVE RED TIMELINE INDICATOR */}
+                    {(() => {
+                      const todayIso = new Date().toISOString().split('T')[0];
+                      const isToday = selectedDate === todayIso;
+                      const isWithinDay = currentMinutes >= 330 && currentMinutes <= 1380; // 05:30 to 23:00
+                      if (!isToday || !isWithinDay || displayedTimeSlots.length === 0) return null;
+
+                      // Start minute of the first displayed slot
+                      const [firstH, firstM] = displayedTimeSlots[0].split(' - ')[0].split(':').map(Number);
+                      const firstStartMin = firstH * 60 + (firstM || 0);
+
+                      // Calculate relative slot fraction from top of displayed rows
+                      const slotFraction = (currentMinutes - firstStartMin) / 30;
+                      if (slotFraction < 0) return null; // Don't draw if above visible area
+                      const topOffsetPx = slotFraction * 44;
+                      const liveHour = Math.floor(currentMinutes / 60);
+                      const liveMin = currentMinutes % 60;
+                      const liveTimeFormatted = `${String(liveHour).padStart(2, '0')}:${String(liveMin).padStart(2, '0')}`;
+
+                      return (
+                        <div
+                          style={{ top: `${topOffsetPx}px` }}
+                          className="absolute left-0 right-0 z-25 pointer-events-none flex items-center"
+                        >
+                          {/* Live Time Badge on Left Sticky Axis */}
+                          <div className="sticky left-1 z-35 -mt-3 flex items-center gap-1 bg-red-600 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-md border border-white animate-pulse">
+                            <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span>
+                            🔴 {liveTimeFormatted} HIỆN TẠI
+                          </div>
+                          {/* Red Line spanning entire matrix */}
+                          <div className="flex-1 h-[2px] bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] border-t border-red-400"></div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Time Slot Rows */}
+                    {displayedTimeSlots.map((slot, rowIndex) => {
+                      const [startH, startM] = slot.split(' - ')[0].split(':').map(Number);
+                      const isPeak = startH >= 16;
+                      const slotStartMinutes = startH * 60 + (startM || 0);
+                      const todayIso = new Date().toISOString().split('T')[0];
+                      const isPast = selectedDate < todayIso || (selectedDate === todayIso && slotStartMinutes < currentMinutes);
+
+                      const visibleCourts = courts.filter(c => {
+                        if (casualCourtFilter === 'vip') return c.category === 'vip' || c.id === 'court-6' || c.id === 'court-7';
+                        if (casualCourtFilter === 'training') return c.category === 'training' || c.id === 'court-8' || c.id === 'court-9';
+                        if (casualCourtFilter === 'standard') return c.category === 'standard' || (c.id >= 'court-1' && c.id <= 'court-5');
+                        if (casualCourtFilter === 'indoor') return c.type === 'indoor';
+                        if (casualCourtFilter === 'outdoor') return c.type === 'outdoor';
+                        return true;
+                      });
+
+                      return (
+                        <tr key={slot} className={`h-11 transition-colors ${isPast ? 'bg-slate-50/40' : 'hover:bg-slate-50/50'}`}>
+                          {/* Left Sticky Time Column */}
+                          <td className={`p-2 text-center text-xs font-bold border-r border-slate-200 sticky left-0 z-10 backdrop-blur-xs transition-opacity ${
+                            isPast ? 'bg-slate-100/90 opacity-50 select-none' : 'bg-slate-50/95'
+                          }`}>
+                            <div className="flex items-center justify-center gap-1">
+                              <span className={isPast ? 'text-slate-400 line-through' : isPeak ? 'text-amber-800 font-extrabold' : 'text-slate-700'}>
+                                {slot.split(' - ')[0]}
+                              </span>
+                              {!isPast && isPeak && (
+                                <span className="text-[9px] text-amber-600 font-black" title="Khung giờ vàng Peak">
+                                  ⚡
+                                </span>
+                              )}
+                            </div>
+                            <div className={`text-[9px] font-normal ${isPast ? 'text-slate-300 line-through' : 'text-slate-400'}`}>
+                              {slot.split(' - ')[1]}
+                            </div>
+                          </td>
+
+                          {/* Court Slot Cells */}
+                          {visibleCourts.map((court) => {
+                            const bookingInfo = getSlotBookingInfo(court.id, slot, selectedDate);
+                            const isOccupied = Boolean(bookingInfo);
+                            const isSelected = selectedCourtId === court.id && selectedSlots.includes(slot);
+                            const rate = isPeak ? court.hourlyRatePeak : court.hourlyRateNormal;
+                            const slotPrice = Math.round(rate * 0.5);
+
+                            if (isOccupied && bookingInfo) {
+                              const tag = getBookingTagInfo(bookingInfo);
+                              return (
+                                <td
+                                  key={court.id}
+                                  className={`p-1 border-r border-slate-100 text-center relative ${isPast ? 'bg-slate-50/40' : ''}`}
+                                  title={`${tag.badgeText} (${slot})${isPast ? ' - Đã diễn ra' : ''}`}
+                                >
+                                  <div className={`w-full h-9 rounded-lg px-1.5 py-0.5 flex flex-col justify-center items-center text-[10px] font-bold border transition-all cursor-not-allowed select-none ${
+                                    isPast
+                                      ? 'opacity-45 grayscale-[35%] bg-slate-200 text-slate-600 border-slate-300'
+                                      : tag.bgClass
+                                  }`}>
+                                    <span className="truncate w-full text-center leading-tight">
+                                      {tag.shortText}
+                                    </span>
+                                    <span className="text-[8px] opacity-90 uppercase tracking-tighter">
+                                      {tag.label} {isPast && '(Đã qua)'}
+                                    </span>
+                                  </div>
+                                </td>
+                              );
+                            }
+
+                            // Past available slot: dimmed, blurred, disabled
+                            if (isPast) {
+                              return (
+                                <td key={court.id} className="p-1 border-r border-slate-100 text-center bg-slate-50/50">
+                                  <div
+                                    className="w-full h-9 rounded-lg border border-dashed border-slate-200/90 bg-slate-100/70 text-slate-400 flex flex-col justify-center items-center text-[10px] cursor-not-allowed select-none opacity-35"
+                                    title="Khung giờ trong quá khứ, không thể đặt"
+                                  >
+                                    <span className="font-semibold text-[10px] text-slate-400 line-through">
+                                      {slot.split(' - ')[0]}
+                                    </span>
+                                    <span className="text-[8px] text-slate-400 uppercase tracking-tighter">
+                                      Đã qua
+                                    </span>
+                                  </div>
+                                </td>
+                              );
+                            }
+
+                            if (isSelected) {
+                              return (
+                                <td key={court.id} className="p-1 border-r border-slate-100 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleSlot(slot, court.id)}
+                                    className="w-full h-9 rounded-lg bg-[#11385E] text-white border-2 border-amber-400 shadow-sm flex flex-col justify-center items-center text-[10px] font-extrabold cursor-pointer transition-all hover:bg-[#0c2946] ring-2 ring-[#11385E]/30"
+                                  >
+                                    <span className="flex items-center gap-0.5 text-amber-300">
+                                      <Check className="w-3 h-3" /> Đã chọn
+                                    </span>
+                                    <span className="text-[9px] text-white/90 font-mono">
+                                      {slotPrice.toLocaleString('vi-VN')}đ
+                                    </span>
+                                  </button>
+                                </td>
+                              );
+                            }
+
+                            // Available Future Slot Cell
+                            return (
+                              <td key={court.id} className="p-1 border-r border-slate-100 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleSlot(slot, court.id)}
+                                  className={`w-full h-9 rounded-lg border border-slate-200/80 bg-white hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-900 transition-all flex flex-col justify-center items-center text-[10px] cursor-pointer group ${
+                                    isPeak ? 'text-slate-800' : 'text-slate-600'
+                                  }`}
+                                >
+                                  <span className="font-bold font-mono group-hover:hidden">
+                                    {Math.round(slotPrice / 1000)}k
+                                  </span>
+                                  <span className="text-[9px] text-slate-400 group-hover:hidden">
+                                    {isPeak ? '⚡Peak' : 'Thường'}
+                                  </span>
+                                  <span className="hidden group-hover:flex items-center gap-0.5 text-emerald-700 font-extrabold text-[10px]">
+                                    + Đặt slot
+                                  </span>
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
-          {/* Casual Summary & Payment */}
+          {/* Casual Summary & Payment Sidebar */}
           <div className="lg:col-span-4">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs sticky top-24">
-              <h3 className="text-base font-extrabold text-[#11385E] mb-4 pb-3 border-b border-slate-100 flex items-center gap-2">
-                <Clock className="w-5 h-5 text-sky-600" />
-                Thông Tin Đặt Vãng Lai
+              <h3 className="text-base font-extrabold text-[#11385E] mb-4 pb-3 border-b border-slate-100 flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-sky-600" />
+                  Phiếu Đặt Sân Vãng Lai
+                </span>
+                <span className="text-xs font-bold text-slate-500">{selectedDate}</span>
               </h3>
 
+              {/* Selected Court & Slots overview */}
+              <div className="bg-blue-50/70 p-3.5 rounded-xl border border-blue-200 mb-4 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600 font-semibold">Sân đã chọn:</span>
+                  <span className="font-extrabold text-[#11385E] text-sm">{selectedCourt?.name}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Loại sân:</span>
+                  <span className="font-semibold text-slate-800 capitalize">
+                    {selectedCourt?.type === 'center_court' ? 'Sân VIP Trung Tâm' : selectedCourt?.type === 'indoor' ? 'Trong Nhà' : 'Ngoài Trời'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-blue-200/60">
+                  <span className="text-slate-600">Khung giờ ({selectedSlots.length} slot):</span>
+                  <span className="font-bold text-indigo-900">
+                    {selectedSlots.length > 0 ? `${selectedSlots.length * 0.5} Giờ` : 'Chưa chọn'}
+                  </span>
+                </div>
+
+                {selectedSlots.length > 0 && (
+                  <div className="flex flex-wrap gap-1 pt-1.5">
+                    {selectedSlots.map(s => (
+                      <span key={s} className="px-2 py-0.5 bg-white text-[#11385E] rounded-md font-mono text-[10px] font-bold border border-blue-200 flex items-center gap-1">
+                        {s}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSlot(s)}
+                          className="text-slate-400 hover:text-red-500"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Customer Info Form */}
               <div className="space-y-3 mb-4 text-xs">
                 <div>
                   <div className="flex items-center justify-between mb-1">
@@ -1703,6 +2237,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                   </div>
                   <input
                     type="text"
+                    required
                     placeholder="Nguyễn Văn A"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
@@ -1714,6 +2249,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">Số điện thoại *</label>
                   <input
                     type="tel"
+                    required
                     placeholder="0908 123 456"
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
@@ -1725,6 +2261,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">Email nhận xác nhận *</label>
                   <input
                     type="email"
+                    required
                     placeholder="email@example.com"
                     value={customerEmail}
                     onChange={(e) => setCustomerEmail(e.target.value)}
@@ -1736,7 +2273,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">Ghi chú (tuỳ chọn)</label>
                   <input
                     type="text"
-                    placeholder="Ví dụ: Cần bóng mới..."
+                    placeholder="Ví dụ: Cần mượn thêm vợt..."
                     value={customerNotes}
                     onChange={(e) => setCustomerNotes(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#11385E] focus:outline-none"
@@ -1747,16 +2284,18 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
               {/* Price Calculation */}
               <div className="border-t border-slate-100 pt-3 space-y-1.5 text-xs mb-4">
                 <div className="flex justify-between text-slate-600">
-                  <span>Sân:</span>
-                  <span className="font-semibold text-slate-800">{selectedCourt?.name}</span>
+                  <span>Tiền sân ({selectedSlots.length} slot):</span>
+                  <span className="font-semibold text-slate-800">{casualPricing.courtTotal.toLocaleString('vi-VN')}đ</span>
                 </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>Số slot đã chọn:</span>
-                  <span>{selectedSlots.length} slot ({selectedSlots.length * 0.5} giờ)</span>
-                </div>
-                <div className="flex justify-between text-sm font-extrabold text-slate-900 pt-1 border-t border-slate-100">
-                  <span>Tổng tiền sân:</span>
-                  <span className="text-[#11385E]">{casualPricing.total.toLocaleString('vi-VN')}đ</span>
+                {casualPricing.addOns > 0 && (
+                  <div className="flex justify-between text-slate-600">
+                    <span>Phụ kiện thuê thêm:</span>
+                    <span>+{casualPricing.addOns.toLocaleString('vi-VN')}đ</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-base font-extrabold text-slate-900 pt-2 border-t border-slate-100">
+                  <span>Tổng thanh toán:</span>
+                  <span className="text-[#11385E] text-lg">{casualPricing.total.toLocaleString('vi-VN')}đ</span>
                 </div>
               </div>
 
@@ -1764,14 +2303,14 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                 type="button"
                 onClick={handleBookingSubmit}
                 disabled={selectedSlots.length === 0}
-                className={`w-full py-3 rounded-xl font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                className={`w-full py-3.5 rounded-xl font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md ${
                   selectedSlots.length > 0
-                    ? 'bg-[#11385E] hover:bg-[#0c2946] text-white shadow-sm'
+                    ? 'bg-[#11385E] hover:bg-[#0c2946] text-white hover:shadow-lg'
                     : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                 }`}
               >
-                <Check className="w-4 h-4" />
-                Gửi Yêu Cầu Đặt Sân
+                <Check className="w-4 h-4 text-amber-400" />
+                {selectedSlots.length > 0 ? `Xác Nhận Đặt ${selectedSlots.length} Slot` : 'Vui Lòng Chọn Giờ Trống Trên Grid'}
               </button>
             </div>
           </div>

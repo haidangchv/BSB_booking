@@ -161,14 +161,39 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
                     }`}>
                       {b.bookingType}
                     </span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      b.bookingStatus === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' :
-                      b.bookingStatus === 'HOLD' ? 'bg-purple-100 text-purple-800' :
-                      b.bookingStatus === 'CANCELLED' ? 'bg-red-100 text-red-800' :
-                      'bg-amber-100 text-amber-800'
-                    }`}>
-                      {b.bookingStatus}
-                    </span>
+                    {b.bookingStatus === 'CHECKED_IN' ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-600 text-white shadow-xs">
+                        ✓ Đã Check-in
+                      </span>
+                    ) : b.bookingStatus === 'CHECKIN_PENDING' ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 animate-pulse">
+                        ⏳ Chờ Check-in
+                      </span>
+                    ) : b.bookingStatus === 'NO_SHOW' ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                        ⚠️ Khách Không Đến (No-Show)
+                      </span>
+                    ) : b.bookingStatus === 'COMPLETED' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-900">
+                        ✓ Hoàn Tất
+                      </span>
+                    ) : b.bookingStatus === 'CONFIRMED' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-100 text-teal-800">
+                        Đã Duyệt
+                      </span>
+                    ) : b.bookingStatus === 'HOLD' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
+                        Giữ Chỗ (5p)
+                      </span>
+                    ) : b.bookingStatus === 'CANCELLED' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800">
+                        Đã Hủy
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                        Chờ Duyệt
+                      </span>
+                    )}
                   </div>
 
                   <h4 className="font-bold text-sm text-slate-900 flex items-center gap-1.5">

@@ -4,10 +4,12 @@ export type BookingStatus =
   | 'HOLD' 
   | 'PENDING' 
   | 'CONFIRMED' 
+  | 'CHECKIN_PENDING' 
+  | 'CHECKED_IN' 
   | 'COMPLETED' 
+  | 'NO_SHOW' 
   | 'CANCELLED' 
-  | 'REJECTED' 
-  | 'NO_SHOW';
+  | 'REJECTED';
 
 export type CourtStatus = 'ACTIVE' | 'MAINTENANCE' | 'INACTIVE';
 export type ClubStatus = 'ACTIVE' | 'INACTIVE';
@@ -117,6 +119,9 @@ export interface Booking {
   paymentStatus: 'pending' | 'paid' | 'deposit_paid';
   bookingStatus: BookingStatus;
   holdExpiresAt?: string; // ISO string for 5-minute temporary hold
+  checkinTime?: string; // ISO string when admin checked in
+  noShowReason?: string; // Reason if marked as no-show
+  lastReminderSentAt?: string; // Timestamp of last reminder
   notes?: string;
   createdByRole?: 'customer' | 'admin';
   createdAt: string;

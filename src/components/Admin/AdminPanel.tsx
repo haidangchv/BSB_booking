@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShieldCheck, Users, Calendar, Trophy, Plus, Check, 
   Trash2, Edit, CheckCircle2, Clock, X, DollarSign, 
   Activity, Layers, AlertCircle, FileText, Database, 
   RefreshCw, Lock, Sparkles, AlertTriangle, ArrowUpRight,
-  Ban, Unlock, CalendarClock, ArrowRightLeft, Mail, Send, Search
+  Ban, Unlock, CalendarClock, ArrowRightLeft, Mail, Send, Search,
+  UserCheck, UserX, Bell, AlertOctagon
 } from 'lucide-react';
 import { Club, Booking, Minitour, Court, BookingType, BookingStatus, User, CourtBlock, EmailNotification } from '../../types';
 import { DatabaseService, isSupabaseConfigured, checkSlotConflict } from '../../lib/supabase';
 import { EmailService } from '../../lib/emailService';
+import { isGracePeriodWarning } from '../../lib/bookingLifecycle';
 import { EmailPreviewModal } from '../Email/EmailPreviewModal';
 
 interface AdminPanelProps {
@@ -19,7 +21,7 @@ interface AdminPanelProps {
   courts: Court[];
   currentUser?: User | null;
   onAddClub: (club: Club) => void;
-  onUpdateBookingStatus: (id: string, status: BookingStatus) => void;
+  onUpdateBookingStatus: (id: string, status: BookingStatus, extraFields?: { checkinTime?: string; noShowReason?: string; lastReminderSentAt?: string }) => void;
   onRescheduleBooking: (bookingId: string, newDate: string, newStartTime: string, newEndTime: string, newCourtId?: string, newCourtName?: string) => void;
   onBlockCourt: (courtId: string, date: string, startTime: string, endTime: string, reason: string) => string[];
   onAddMinitour: (tour: Minitour) => void;
@@ -85,9 +87,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [newTourFee, setNewTourFee] = useState<number>(500000);
   const [newTourPrize, setNewTourPrize] = useState<number>(12000000);
 
-  // Filter Bookings
+  // Filter & Sort Bookings
   const [bookingFilter, setBookingFilter] = useState<'all' | BookingType>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [bookingSortBy, setBookingSortBy] = useState<'pending_first' | 'time_asc' | 'time_desc' | 'created_desc'>('pending_first');
+  const [bookingSearchQuery, setBookingSearchQuery] = useState('');
+
+  // No-show Modal State
+  const [noShowModalBooking, setNoShowModalBooking] = useState<Booking | null>(null);
+  const [noShowReasonInput, setNoShowReasonInput] = useState('Khách không đến (Quá giờ không liên lạc được)');
 
   // Reschedule Modal State
   const [rescheduleBooking, setRescheduleBooking] = useState<Booking | null>(null);
@@ -284,11 +292,70 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     localStorage.setItem('bsb_court_blocks_v2', JSON.stringify(updated));
   };
 
-  const filteredBookings = bookings.filter(b => {
-    const matchesType = bookingFilter === 'all' || b.bookingType === bookingFilter;
-    const matchesStatus = statusFilter === 'all' || b.bookingStatus === statusFilter;
-    return matchesType && matchesStatus;
-  });
+  const filteredBookings = useMemo(() => {
+    const query = bookingSearchQuery.trim().toLowerCase();
+    const list = bookings.filter(b => {
+      const matchesType = bookingFilter === 'all' || b.bookingType === bookingFilter;
+      const matchesStatus = statusFilter === 'all' || b.bookingStatus === statusFilter;
+      const matchesSearch = !query || 
+        b.bookingCode.toLowerCase().includes(query) ||
+        (b.customerPhone && b.customerPhone.includes(query)) ||
+        (b.customerName && b.customerName.toLowerCase().includes(query)) ||
+        (b.courtName && b.courtName.toLowerCase().includes(query)) ||
+        (b.customerEmail && b.customerEmail.toLowerCase().includes(query));
+
+      return matchesType && matchesStatus && matchesSearch;
+    });
+
+    const parseDateTime = (dateStr: string, timeStr: string) => {
+      if (!dateStr) return 0;
+      const start = (timeStr || '00:00').split(' - ')[0];
+      const [h, m] = start.split(':').map(Number);
+      const d = new Date(dateStr);
+      d.setHours(h || 0, m || 0, 0, 0);
+      return d.getTime();
+    };
+
+    return list.sort((a, b) => {
+      if (bookingSortBy === 'pending_first') {
+        // Priority weight: CHECKIN_PENDING (1), PENDING (2), CHECKED_IN (3), CONFIRMED (4), HOLD (5), COMPLETED (6), NO_SHOW (7), CANCELLED (8)
+        const getPriority = (status: string) => {
+          if (status === 'CHECKIN_PENDING') return 1;
+          if (status === 'PENDING') return 2;
+          if (status === 'CHECKED_IN') return 3;
+          if (status === 'CONFIRMED') return 4;
+          if (status === 'HOLD') return 5;
+          if (status === 'COMPLETED') return 6;
+          if (status === 'NO_SHOW') return 7;
+          return 8;
+        };
+        const pA = getPriority(a.bookingStatus);
+        const pB = getPriority(b.bookingStatus);
+        if (pA !== pB) return pA - pB;
+        // Same status: sort by play time ascending (nearest first)
+        return parseDateTime(a.date, a.startTime) - parseDateTime(b.date, b.startTime);
+      }
+
+      if (bookingSortBy === 'time_asc') {
+        // Nearest game time first
+        return parseDateTime(a.date, a.startTime) - parseDateTime(b.date, b.startTime);
+      }
+
+      if (bookingSortBy === 'time_desc') {
+        // Farthest game time first
+        return parseDateTime(b.date, b.startTime) - parseDateTime(a.date, a.startTime);
+      }
+
+      if (bookingSortBy === 'created_desc') {
+        // Newly created first
+        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return tB - tA;
+      }
+
+      return 0;
+    });
+  }, [bookings, bookingFilter, statusFilter, bookingSortBy, bookingSearchQuery]);
 
   if (!isUserAdmin) {
     return (
@@ -555,40 +622,88 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* TAB 2: BOOKINGS MANAGEMENT (ALL 5 TYPES) */}
       {activeAdminTab === 'bookings' && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-blue-50/70 p-4 rounded-2xl border border-blue-200 gap-3">
-            <div>
-              <h3 className="font-bold text-[#11385E] text-sm">Duyệt & Quản Lý Đặt Sân Tự Động</h3>
-              <p className="text-xs text-slate-600">
-                Theo dõi 5 loại hình: CLB, Minitour, Cố định, Vãng lai, Sự kiện. Tự động gửi email xác nhận cho khách hàng.
-              </p>
+          {/* Quick Check-in & Search Toolbar */}
+          <div className="bg-blue-50/80 p-4 rounded-2xl border border-blue-200 space-y-3">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div>
+                <h3 className="font-bold text-[#11385E] text-sm flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-emerald-600" />
+                  Quy Trình Duyệt & Check-in Sân BSB
+                </h3>
+                <p className="text-xs text-slate-600">
+                  Check-in khách đến • Cảnh báo trễ &gt;15p (Nhắc lịch) • Tự động chuyển No-show sau 30p để giải phóng sân.
+                </p>
+              </div>
+
+              {/* Fast Search input for Check-in */}
+              <div className="relative w-full sm:w-72">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={bookingSearchQuery}
+                  onChange={e => setBookingSearchQuery(e.target.value)}
+                  placeholder="Tra cứu Mã booking / SĐT khách..."
+                  className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#11385E]"
+                />
+                {bookingSearchQuery && (
+                  <button
+                    onClick={() => setBookingSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-slate-500">Loại hình:</span>
-              <select
-                value={bookingFilter}
-                onChange={(e) => setBookingFilter(e.target.value as any)}
-                className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold"
-              >
-                <option value="all">Tất cả loại hình</option>
-                <option value="clb">Câu Lạc Bộ</option>
-                <option value="minitour">Minitour</option>
-                <option value="fixed">Cố Định</option>
-                <option value="casual">Vãng Lai</option>
-                <option value="event">Sự Kiện</option>
-              </select>
-              <span className="text-xs text-slate-500 ml-1">Trạng thái:</span>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold"
-              >
-                <option value="all">Tất cả trạng thái</option>
-                <option value="HOLD">HOLD (Giữ chỗ 5p)</option>
-                <option value="PENDING">PENDING (Chờ duyệt)</option>
-                <option value="CONFIRMED">CONFIRMED (Đã duyệt)</option>
-                <option value="COMPLETED">COMPLETED (Hoàn tất)</option>
-                <option value="CANCELLED">CANCELLED (Đã hủy)</option>
-              </select>
+
+            {/* Filter Pills & Sort bar */}
+            <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-blue-100">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-600">Loại:</span>
+                <select
+                  value={bookingFilter}
+                  onChange={(e) => setBookingFilter(e.target.value as any)}
+                  className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold"
+                >
+                  <option value="all">Tất cả loại hình</option>
+                  <option value="clb">Câu Lạc Bộ</option>
+                  <option value="minitour">Minitour</option>
+                  <option value="fixed">Cố Định</option>
+                  <option value="casual">Vãng Lai</option>
+                  <option value="event">Sự Kiện</option>
+                </select>
+
+                <span className="text-xs font-bold text-slate-600 ml-1">Trạng thái:</span>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold"
+                >
+                  <option value="all">Tất cả trạng thái</option>
+                  <option value="CHECKIN_PENDING">⏳ CHECKIN_PENDING (Chờ check-in)</option>
+                  <option value="CHECKED_IN">✓ CHECKED_IN (Đã check-in)</option>
+                  <option value="CONFIRMED">CONFIRMED (Đã duyệt)</option>
+                  <option value="COMPLETED">COMPLETED (Hoàn tất)</option>
+                  <option value="NO_SHOW">⚠️ NO_SHOW (Khách không đến)</option>
+                  <option value="PENDING">PENDING (Chờ duyệt)</option>
+                  <option value="HOLD">HOLD (Giữ chỗ 5p)</option>
+                  <option value="CANCELLED">CANCELLED (Đã hủy)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-600">Sắp xếp:</span>
+                <select
+                  value={bookingSortBy}
+                  onChange={(e) => setBookingSortBy(e.target.value as any)}
+                  className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-[#11385E]"
+                >
+                  <option value="pending_first">⚡ Ưu tiên Chờ Check-in & Duyệt</option>
+                  <option value="time_asc">🕒 Giờ Chơi: Gần nhất trước</option>
+                  <option value="time_desc">🕒 Giờ Chơi: Xa nhất trước</option>
+                  <option value="created_desc">🆕 Đăng Ký Mới Nhất</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -602,102 +717,225 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <th className="p-3.5">Sân & Thời Gian</th>
                   <th className="p-3.5">Tổng Tiền</th>
                   <th className="p-3.5">Trạng Thái</th>
-                  <th className="p-3.5 text-right">Duyệt & Thao Tác</th>
+                  <th className="p-3.5 text-right">Quy Trình & Thao Tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredBookings.map(b => (
-                  <tr key={b.id} className="hover:bg-slate-50/70">
-                    <td className="p-3.5 font-mono font-bold text-[#11385E]">{b.bookingCode}</td>
-                    <td className="p-3.5">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        b.bookingType === 'clb'
-                          ? 'bg-[#11385E]/15 text-[#11385E]'
-                          : b.bookingType === 'minitour'
-                          ? 'bg-amber-100 text-amber-900'
-                          : b.bookingType === 'fixed'
-                          ? 'bg-slate-200 text-slate-800'
-                          : b.bookingType === 'casual'
-                          ? 'bg-blue-100 text-blue-900'
-                          : 'bg-indigo-100 text-indigo-900'
-                      }`}>
-                        {b.bookingType}
-                      </span>
-                    </td>
-                    <td className="p-3.5">
-                      <div className="font-bold text-slate-900">{b.customerName}</div>
-                      <div className="text-[10px] text-slate-400">{b.customerPhone}</div>
-                      {b.customerEmail && <div className="text-[10px] text-slate-500 font-mono">{b.customerEmail}</div>}
-                      {b.clubName && <div className="text-[10px] text-indigo-600 font-medium">{b.clubName}</div>}
-                    </td>
-                    <td className="p-3.5">
-                      <div className="font-semibold text-[#11385E]">{b.courtName}</div>
-                      <div className="text-[10px] text-slate-500">
-                        {b.date} ({b.startTime} - {b.endTime})
-                      </div>
-                    </td>
-                    <td className="p-3.5 font-bold text-slate-900">
-                      {b.totalAmount.toLocaleString('vi-VN')}đ
-                    </td>
-                    <td className="p-3.5">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        b.bookingStatus === 'CONFIRMED'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : b.bookingStatus === 'CANCELLED'
-                          ? 'bg-red-100 text-red-800'
-                          : b.bookingStatus === 'HOLD'
-                          ? 'bg-purple-100 text-purple-800'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}>
-                        {b.bookingStatus}
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-right">
-                      <div className="flex items-center justify-end gap-1 flex-wrap">
-                        {b.bookingStatus !== 'CONFIRMED' && b.bookingStatus !== 'CANCELLED' && (
-                          <button
-                            onClick={() => onUpdateBookingStatus(b.id, 'CONFIRMED')}
-                            className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold cursor-pointer"
-                          >
-                            ✓ Duyệt
-                          </button>
-                        )}
-                        {b.bookingStatus !== 'CANCELLED' && b.bookingStatus !== 'COMPLETED' && (
-                          <button
-                            onClick={() => openRescheduleModal(b)}
-                            className="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded text-[10px] font-bold cursor-pointer flex items-center gap-0.5"
-                          >
-                            <ArrowRightLeft className="w-3 h-3" />
-                            Đổi giờ
-                          </button>
-                        )}
-                        <button
-                          onClick={async () => {
-                            let em = EmailService.getEmailByBookingId(b.id);
-                            if (!em) {
-                              em = await EmailService.sendBookingConfirmationEmail(b, b.bookingStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PENDING');
-                            }
-                            setPreviewEmail(em);
-                            setIsPreviewEmailOpen(true);
-                          }}
-                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold cursor-pointer flex items-center gap-0.5"
-                          title="Xem email xác nhận"
-                        >
-                          <Mail className="w-3 h-3 text-slate-500" />
-                          Email
-                        </button>
-                        {b.bookingStatus !== 'CANCELLED' && (
-                          <button
-                            onClick={() => onUpdateBookingStatus(b.id, 'CANCELLED')}
-                            className="px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-[10px] font-bold cursor-pointer"
-                          >
-                            Hủy
-                          </button>
-                        )}
-                      </div>
+                {filteredBookings.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="p-8 text-center text-slate-400">
+                      Không tìm thấy lịch đặt nào phù hợp với bộ lọc / từ khóa.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredBookings.map(b => {
+                    const now = new Date();
+                    const todayIso = now.toISOString().split('T')[0];
+                    const currentMin = now.getHours() * 60 + now.getMinutes();
+                    const [h, m] = (b.startTime || '00:00').split(':').map(Number);
+                    const startMin = (h || 0) * 60 + (m || 0);
+
+                    const isLate = isGracePeriodWarning(b, todayIso, currentMin);
+
+                    // Check-in button ONLY appears from 15 minutes before game time
+                    const canCheckin = (b.bookingStatus === 'CONFIRMED' || b.bookingStatus === 'CHECKIN_PENDING') &&
+                      (b.date < todayIso || (b.date === todayIso && currentMin >= startMin - 15));
+
+                    // No-show button ONLY appears after 15 minutes late from start time
+                    const canMarkNoShow = (b.bookingStatus === 'CONFIRMED' || b.bookingStatus === 'CHECKIN_PENDING') &&
+                      (b.date < todayIso || (b.date === todayIso && currentMin >= startMin + 15));
+
+                    return (
+                      <tr key={b.id} className={`hover:bg-slate-50/70 ${isLate ? 'bg-rose-50/40' : ''}`}>
+                        <td className="p-3.5 font-mono font-bold text-[#11385E]">
+                          <div>{b.bookingCode}</div>
+                          {b.checkinTime && (
+                            <span className="text-[9px] text-emerald-700 font-semibold flex items-center gap-0.5">
+                              <UserCheck className="w-2.5 h-2.5" /> Check-in: {b.checkinTime.split('T')[1]?.substring(0, 5)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            b.bookingType === 'clb'
+                              ? 'bg-[#11385E]/15 text-[#11385E]'
+                              : b.bookingType === 'minitour'
+                              ? 'bg-amber-100 text-amber-900'
+                              : b.bookingType === 'fixed'
+                              ? 'bg-slate-200 text-slate-800'
+                              : b.bookingType === 'casual'
+                              ? 'bg-blue-100 text-blue-900'
+                              : 'bg-indigo-100 text-indigo-900'
+                          }`}>
+                            {b.bookingType}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          <div className="font-bold text-slate-900">{b.customerName}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">{b.customerPhone}</div>
+                          {b.customerEmail && <div className="text-[10px] text-slate-400">{b.customerEmail}</div>}
+                          {b.clubName && <div className="text-[10px] text-indigo-600 font-medium">{b.clubName}</div>}
+                        </td>
+                        <td className="p-3.5">
+                          <div className="font-semibold text-[#11385E]">{b.courtName}</div>
+                          <div className="text-[10px] text-slate-500">
+                            {b.date} ({b.startTime} - {b.endTime})
+                          </div>
+                        </td>
+                        <td className="p-3.5 font-bold text-slate-900">
+                          {b.totalAmount.toLocaleString('vi-VN')}đ
+                        </td>
+                        <td className="p-3.5">
+                          {b.bookingStatus === 'CHECKIN_PENDING' ? (
+                            isLate ? (
+                              <div className="space-y-1">
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-xs animate-bounce flex items-center gap-1 w-fit">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span>
+                                  ⚠️ Trễ Check-in (&gt;15p)
+                                </span>
+                                <span className="text-[9px] text-rose-600 font-medium block">
+                                  Quá 30p sẽ tự chuyển No-show
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 w-fit">
+                                <Clock className="w-3 h-3 text-amber-700" />
+                                Chờ Check-in
+                              </span>
+                            )
+                          ) : b.bookingStatus === 'CHECKED_IN' ? (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-600 text-white shadow-xs flex items-center gap-1 w-fit">
+                              <UserCheck className="w-3 h-3" />
+                              ✓ Đã Check-in
+                            </span>
+                          ) : b.bookingStatus === 'NO_SHOW' ? (
+                            <div className="space-y-0.5">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200 flex items-center gap-1 w-fit">
+                                <UserX className="w-3 h-3 text-rose-600" />
+                                No-Show (Giải phóng sân)
+                              </span>
+                              {b.noShowReason && (
+                                <span className="text-[9px] text-rose-600 block italic max-w-[160px] truncate" title={b.noShowReason}>
+                                  {b.noShowReason}
+                                </span>
+                              )}
+                            </div>
+                          ) : b.bookingStatus === 'COMPLETED' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-900">
+                              ✓ Hoàn tất
+                            </span>
+                          ) : b.bookingStatus === 'CONFIRMED' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-100 text-teal-800">
+                              Đã duyệt
+                            </span>
+                          ) : b.bookingStatus === 'CANCELLED' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">
+                              Đã hủy
+                            </span>
+                          ) : b.bookingStatus === 'HOLD' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
+                              Giữ chỗ (5p)
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                              Chờ duyệt
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <div className="flex items-center justify-end gap-1 flex-wrap">
+                            {/* APPROVE BUTTON (For PENDING / HOLD) */}
+                            {(b.bookingStatus === 'PENDING' || b.bookingStatus === 'HOLD') && (
+                              <button
+                                onClick={() => onUpdateBookingStatus(b.id, 'CONFIRMED')}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold cursor-pointer flex items-center gap-1 shadow-2xs"
+                              >
+                                <Check className="w-3 h-3" />
+                                Duyệt
+                              </button>
+                            )}
+
+                            {/* CHECK-IN BUTTON (Appears ONLY from 15 minutes before game time) */}
+                            {canCheckin && (
+                              <button
+                                onClick={() => onUpdateBookingStatus(b.id, 'CHECKED_IN', { checkinTime: new Date().toISOString() })}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-extrabold cursor-pointer flex items-center gap-1 shadow-xs"
+                                title="Xác nhận khách đã đến sân (Từ 15p trước giờ chơi)"
+                              >
+                                <UserCheck className="w-3 h-3" />
+                                Check-in
+                              </button>
+                            )}
+
+                            {/* MARK NO-SHOW BUTTON (Appears ONLY after 15 minutes late) */}
+                            {canMarkNoShow && (
+                              <button
+                                onClick={() => {
+                                  setNoShowModalBooking(b);
+                                  setNoShowReasonInput('Khách không đến (Quá 15-30 phút không liên lạc được)');
+                                }}
+                                className="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-[10px] font-bold cursor-pointer flex items-center gap-0.5"
+                                title="Đánh dấu khách không đến sau khi trễ 15p và giải phóng sân"
+                              >
+                                <UserX className="w-3 h-3 text-rose-600" />
+                                No-Show
+                              </button>
+                            )}
+
+                            {/* EARLY COMPLETE BUTTON (For CHECKED_IN) */}
+                            {b.bookingStatus === 'CHECKED_IN' && (
+                              <button
+                                onClick={() => onUpdateBookingStatus(b.id, 'COMPLETED')}
+                                className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                title="Hoàn tất trả sân"
+                              >
+                                ✓ Xong
+                              </button>
+                            )}
+
+                            {/* RESCHEDULE BUTTON */}
+                            {b.bookingStatus !== 'CANCELLED' && b.bookingStatus !== 'COMPLETED' && b.bookingStatus !== 'NO_SHOW' && (
+                              <button
+                                onClick={() => openRescheduleModal(b)}
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold cursor-pointer flex items-center gap-0.5"
+                              >
+                                <ArrowRightLeft className="w-3 h-3" />
+                                Đổi giờ
+                              </button>
+                            )}
+
+                            {/* EMAIL PREVIEW BUTTON */}
+                            <button
+                              onClick={async () => {
+                                let em = EmailService.getEmailByBookingId(b.id);
+                                if (!em) {
+                                  em = await EmailService.sendBookingConfirmationEmail(b, b.bookingStatus === 'CONFIRMED' || b.bookingStatus === 'CHECKED_IN' ? 'CONFIRMED' : 'PENDING');
+                                }
+                                setPreviewEmail(em);
+                                setIsPreviewEmailOpen(true);
+                              }}
+                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold cursor-pointer flex items-center gap-0.5"
+                              title="Xem email xác nhận"
+                            >
+                              <Mail className="w-3 h-3 text-slate-500" />
+                              Email
+                            </button>
+
+                            {/* CANCEL BUTTON */}
+                            {b.bookingStatus !== 'CANCELLED' && b.bookingStatus !== 'COMPLETED' && b.bookingStatus !== 'NO_SHOW' && (
+                              <button
+                                onClick={() => onUpdateBookingStatus(b.id, 'CANCELLED')}
+                                className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg text-[10px] font-bold cursor-pointer"
+                              >
+                                Hủy
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -1531,6 +1769,104 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                 </div>
               )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* NO-SHOW CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {noShowModalBooking && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-rose-200"
+            >
+              <div className="flex items-center justify-between border-b border-rose-100 pb-3">
+                <div className="flex items-center gap-2 text-rose-700">
+                  <div className="p-2 bg-rose-100 rounded-xl">
+                    <UserX className="w-5 h-5 text-rose-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-sm text-slate-900">
+                      Xác Nhận Khách Không Đến (No-Show)
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Giải phóng sân cho khách vãng lai khác đặt
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setNoShowModalBooking(null)}
+                  className="p-1 rounded-full text-slate-400 hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs space-y-1.5">
+                <div className="flex justify-between font-mono font-bold text-[#11385E]">
+                  <span>Mã: {noShowModalBooking.bookingCode}</span>
+                  <span className="text-rose-700">{noShowModalBooking.courtName}</span>
+                </div>
+                <div className="text-slate-700">
+                  Khách: <strong>{noShowModalBooking.customerName}</strong> ({noShowModalBooking.customerPhone})
+                </div>
+                <div className="text-slate-600">
+                  Khung giờ: <strong>{noShowModalBooking.date} ({noShowModalBooking.startTime} - {noShowModalBooking.endTime})</strong>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 text-xs">
+                <label className="block font-bold text-slate-700">
+                  Lý do ghi nhận No-Show:
+                </label>
+                <textarea
+                  value={noShowReasonInput}
+                  onChange={e => setNoShowReasonInput(e.target.value)}
+                  rows={3}
+                  placeholder="Nhập lý do khách không đến..."
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-800 flex items-start gap-2">
+                <AlertOctagon className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span>
+                  Sau khi xác nhận No-Show, khung giờ này trên {noShowModalBooking.courtName} sẽ được <strong>giải phóng ngay lập tức</strong> để hệ thống tiếp nhận khách đặt mới.
+                </span>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setNoShowModalBooking(null)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  Đóng
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!noShowModalBooking) return;
+                    onUpdateBookingStatus(noShowModalBooking.id, 'NO_SHOW', {
+                      noShowReason: noShowReasonInput || 'Khách không đến (No-show)'
+                    });
+                    setNoShowModalBooking(null);
+                  }}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                >
+                  <UserX className="w-4 h-4" />
+                  Xác Nhận & Giải Phóng Sân
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}

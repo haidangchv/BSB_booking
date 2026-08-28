@@ -101,9 +101,35 @@ export const TicketLookupModal: React.FC<TicketLookupModalProps> = ({
                           {b.bookingCode}
                         </div>
                       </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">
-                        Đã xác nhận
-                      </span>
+                      {b.bookingStatus === 'CHECKED_IN' ? (
+                        <span className="text-[10px] font-extrabold px-2.5 py-0.5 bg-emerald-600 text-white rounded-full shadow-xs">
+                          ✓ Đã Check-in
+                        </span>
+                      ) : b.bookingStatus === 'CHECKIN_PENDING' ? (
+                        <span className="text-[10px] font-bold px-2.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-full animate-pulse">
+                          ⏳ Chờ Check-in
+                        </span>
+                      ) : b.bookingStatus === 'NO_SHOW' ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-rose-100 text-rose-800 border border-rose-200 rounded-full">
+                          ⚠️ No-Show (Giải phóng sân)
+                        </span>
+                      ) : b.bookingStatus === 'COMPLETED' ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-100 text-blue-900 rounded-full">
+                          ✓ Đã hoàn tất
+                        </span>
+                      ) : b.bookingStatus === 'CONFIRMED' ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">
+                          Đã xác nhận
+                        </span>
+                      ) : b.bookingStatus === 'CANCELLED' ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-red-100 text-red-800 rounded-full">
+                          Đã hủy
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full">
+                          Chờ duyệt
+                        </span>
+                      )}
                     </div>
 
                     <div className="space-y-1 text-slate-700 text-[11px]">
